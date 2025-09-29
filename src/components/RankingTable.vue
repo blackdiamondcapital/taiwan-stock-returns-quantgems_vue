@@ -2,22 +2,65 @@
 const props = defineProps({
   rows: { type: Array, default: () => [] },
   sort: { type: Object, default: () => ({ column: 'return', direction: 'desc' }) },
+  period: { type: String, default: 'daily' },
+  filters: { type: Object, default: () => ({ market: 'all', industry: 'all', returnRange: 'all', volumeThreshold: 0 }) },
 })
-const emit = defineEmits(['change-sort'])
+const emit = defineEmits(['change-sort', 'update:period', 'update:filters'])
+
+const periodOptions = [
+  { value: 'daily', label: '日' },
+  { value: 'weekly', label: '週' },
+  { value: 'monthly', label: '月' },
+  { value: 'quarterly', label: '季' },
+  { value: 'yearly', label: '年' },
+]
 
 function onHeaderClick(col){
   const dir = (props.sort.column === col) ? (props.sort.direction === 'asc' ? 'desc' : 'asc') : 'desc'
   emit('change-sort', { column: col, direction: dir })
 }
+
+function onSelectMarket(event){
+  const next = { ...props.filters, market: event.target.value }
+  emit('update:filters', next)
+}
+
+function onSelectPeriod(p){
+  if (p === props.period) return
+  emit('update:period', p)
+}
 </script>
 
 <template>
-  <div class="ranking-table-container">
-    <div class="table-header">
-      <div class="table-title"><i class="fas fa-list-ol"></i> 市場排行榜</div>
-    </div>
-    <div class="table-container">
-      <table class="ranking-table">
+  <section class="ranking-section">
+    <div class="ranking-table-container">
+      <div class="table-header">
+        <div class="ranking-header-card">
+          <div class="ranking-header-top">
+            <div class="table-title"><i class="fas fa-list-ol"></i> 市場排行榜</div>
+            <div class="ranking-period-control">
+              <button
+                v-for="item in periodOptions"
+                :key="item.value"
+                type="button"
+                class="period-chip"
+                :class="{ active: props.period === item.value }"
+                @click="onSelectPeriod(item.value)"
+              >{{ item.label }}</button>
+            </div>
+          </div>
+          <div class="ranking-filter-bar">
+            <label class="filter-label">市場別</label>
+            <select class="filter-input" :value="props.filters.market" @change="onSelectMarket">
+              <option value="all">全部市場</option>
+              <option value="listed">上市</option>
+              <option value="otc">上櫃</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="table-container">
+        <table class="ranking-table">
         <thead>
           <tr>
             <th :class="{sorted: sort.column==='rank', [sort.direction]: sort.column==='rank'}" @click="onHeaderClick('rank')">名次 <span class="sort-indicator"></span></th>
@@ -60,7 +103,8 @@ function onHeaderClick(col){
             </td>
           </tr>
         </tbody>
-      </table>
+        </table>
+      </div>
     </div>
-  </div>
+  </section>
 </template>

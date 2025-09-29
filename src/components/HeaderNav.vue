@@ -14,7 +14,7 @@ function onDateInput(e){ emit('update:date', e.target.value) }
 </script>
 
 <template>
-  <div>
+  <div class="top-bar-shell">
     <header class="app-header">
       <div class="header-content">
         <div class="header-title">

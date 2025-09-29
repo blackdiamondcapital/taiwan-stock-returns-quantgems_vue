@@ -1,19 +1,20 @@
 <script setup>
-import { onMounted, onBeforeUnmount, reactive, watch } from 'vue'
+import { onMounted, onBeforeUnmount, reactive, watch, computed, ref, nextTick } from 'vue'
 import Chart from 'chart.js/auto'
+import { fetchRankings } from '../services/api'
 
-const props = defineProps({
-  rows: { type: Array, default: () => [] },
+const panel = reactive({
+  period: 'daily',
+  market: 'all',
 })
 
 const state = reactive({
   factor: 'return',
   buckets: 10,
   metric: 'avg', // avg | ir
-  // 投資決策
   strategyType: 'momentum',
   riskTolerance: 'moderate',
-  investAmount: 1000000,
+  investAmount: 1_000_000,
   maxStocks: 10,
   maxWeight: 20,
   signals: [],
@@ -21,7 +22,50 @@ const state = reactive({
   riskBars: { market: 0, concentration: 0, liquidity: 0 },
 })
 
+const loading = ref(false)
+const analysisRows = ref([])
 let chart
+
+const periodOptions = [
+  { value: 'daily', label: '日' },
+  { value: 'weekly', label: '週' },
+  { value: 'monthly', label: '月' },
+  { value: 'quarterly', label: '季' },
+  { value: 'yearly', label: '年' },
+]
+
+async function loadAnalysisData() {
+  loading.value = true
+  try {
+    const list = await fetchRankings({
+      period: panel.period,
+      market: panel.market,
+      limit: 200,
+    })
+    analysisRows.value = (list || []).map((item, idx) => ({
+      rank: idx + 1,
+      symbol: item.symbol,
+      name: item.name || item.symbol,
+      short_name: item.short_name || item.name || '',
+      return: parseFloat(item.return_rate) || 0,
+      price: parseFloat(item.current_price) || 0,
+      change: parseFloat(item.price_change) || 0,
+      volume: parseInt(item.volume) || 0,
+      cumulative: parseFloat(item.cumulative_return) || 0,
+      market: item.market || 'all',
+      industry: item.industry || 'all',
+      volatility: parseFloat(item.volatility) || 0.5,
+    }))
+    await nextTick()
+    renderChart()
+    assessRisk()
+  } catch (e) {
+    analysisRows.value = []
+    console.warn('analysis load error', e)
+  } finally {
+    loading.value = false
+  }
+}
 
 function buildGroups(data, factorKey, bucketCount){
   const getVal = (d) => (factorKey === 'return' ? Number(d.return) : Number(d[factorKey]))
@@ -47,30 +91,33 @@ function buildGroups(data, factorKey, bucketCount){
 }
 
 function renderChart(){
+  const wrap = document.getElementById('quantBarWrap')
   const ctx = document.getElementById('quantBarCanvas')?.getContext('2d')
-  if (!ctx) return
-  const groups = buildGroups(props.rows, state.factor, Number(state.buckets))
+  if (!ctx || !wrap) return
+  const groups = buildGroups(analysisRows.value, state.factor, Number(state.buckets))
   if (chart) { chart.destroy(); chart = null }
   if (!groups.length){
-    const wrap = document.getElementById('quantBarWrap')
-    if (wrap) wrap.innerHTML = '<div class="muted">無資料</div>'
+    wrap.classList.add('empty')
     return
   }
+  wrap.classList.remove('empty')
   const metricKey = state.metric === 'ir' ? 'ir' : 'mean'
   const labels = groups.map(g => `${g.label} (n=${g.count})`)
   const values = groups.map(g => Number.isFinite(g[metricKey]) ? g[metricKey] : 0)
 
   const posGrad = ctx.createLinearGradient(0, 0, 0, 300)
-  posGrad.addColorStop(0, 'rgba(0, 255, 200, 0.9)')
-  posGrad.addColorStop(1, 'rgba(0, 180, 255, 0.6)')
+  posGrad.addColorStop(0, 'rgba(0, 212, 255, 0.95)')
+  posGrad.addColorStop(1, 'rgba(0, 160, 255, 0.45)')
   const negGrad = ctx.createLinearGradient(0, 0, 0, 300)
   negGrad.addColorStop(0, 'rgba(255, 120, 160, 0.9)')
-  negGrad.addColorStop(1, 'rgba(255, 80, 120, 0.6)')
-  const cyanGrad = ctx.createLinearGradient(0, 0, 0, 300)
-  cyanGrad.addColorStop(0, 'rgba(0, 212, 255, 0.95)')
-  cyanGrad.addColorStop(1, 'rgba(0, 160, 255, 0.6)')
-  const colors = metricKey === 'ir' ? values.map(_ => cyanGrad) : values.map(v => v >= 0 ? posGrad : negGrad)
-  const borderColors = metricKey === 'ir' ? values.map(_ => 'rgba(0, 212, 255, 1)') : values.map(v => v >= 0 ? 'rgba(0, 255, 200, 1)' : 'rgba(255, 120, 160, 1)')
+  negGrad.addColorStop(1, 'rgba(255, 80, 120, 0.55)')
+  const neutralColor = 'rgba(0, 212, 255, 0.85)'
+  const colors = metricKey === 'ir'
+    ? values.map(() => neutralColor)
+    : values.map(v => v >= 0 ? posGrad : negGrad)
+  const borderColors = metricKey === 'ir'
+    ? values.map(() => 'rgba(0, 212, 255, 1)')
+    : values.map(v => v >= 0 ? 'rgba(0, 255, 200, 1)' : 'rgba(255, 120, 160, 1)')
   const ymax = Math.max(2, Math.max(...values.map(v => Math.abs(v))) * 1.2)
   const yMin = metricKey === 'ir' ? 0 : -Math.max(1, ymax * 0.4)
 
@@ -84,9 +131,9 @@ function renderChart(){
         backgroundColor: colors,
         borderColor: borderColors,
         borderWidth: 1.2,
-        borderRadius: 10,
+        borderRadius: 12,
         barThickness: 'flex',
-        maxBarThickness: 32,
+        maxBarThickness: 42,
         hoverBackgroundColor: colors,
       }]
     },
@@ -94,11 +141,11 @@ function renderChart(){
       responsive: true,
       maintainAspectRatio: false,
       plugins: { legend: { display: false } },
-      animation: { duration: 600, easing: 'easeOutQuart' },
+      animation: { duration: 650, easing: 'easeOutQuart' },
       scales: {
-        x: { ticks: { color: '#ffffff', font: { size: 14 } }, grid: { color: 'rgba(255,255,255,0.12)' } },
-        y: { title: { display: true, text: metricKey === 'ir' ? 'IR' : 'Return (%)', color: '#ffffff' },
-             ticks: { color: '#ffffff', font: { size: 14 } }, grid: { color: 'rgba(255,255,255,0.12)' }, suggestedMax: ymax, suggestedMin: yMin }
+        x: { ticks: { color: '#ffffff', font: { size: 14, family: '"Noto Sans TC", sans-serif' } }, grid: { color: 'rgba(255,255,255,0.08)' } },
+        y: { title: { display: true, text: metricKey === 'ir' ? 'Information Ratio' : 'Return (%)', color: '#9ca3af', font: { size: 13 } },
+             ticks: { color: '#e5e7eb', font: { size: 13 } }, grid: { color: 'rgba(255,255,255,0.08)' }, suggestedMax: ymax, suggestedMin: yMin }
       }
     }
   })
@@ -111,26 +158,105 @@ function percentile(arr, p){
   return a[idx]
 }
 
-function computeAnomalies(){
-  const rows = (props.rows || []).filter(d => Number.isFinite(Number(d.return)))
+function buildAnomalies(data){
+  const rows = (data || []).filter(d => Number.isFinite(Number(d.return)))
   if (!rows.length) return []
   const vols = rows.map(r => Number(r.volume)).filter(v => Number.isFinite(v))
-  const vol95 = vols.length ? percentile(vols, 0.95) : Infinity
-  const spikeUp = rows.filter(r => r.return > 5).map(r => ({ type:'up', ...r }))
-  const spikeDown = rows.filter(r => r.return < -5).map(r => ({ type:'down', ...r }))
-  const explosiveVol = rows.filter(r => Number.isFinite(r.volume) && r.volume >= vol95).map(r => ({ type:'vol', ...r }))
-  const items = [...spikeUp.slice(0,30), ...spikeDown.slice(0,30), ...explosiveVol.slice(0,30)]
-    .sort((a,b)=> Math.abs(b.return) - Math.abs(a.return)).slice(0,60)
-  return items
+  const vol90 = vols.length ? percentile(vols, 0.9) : Infinity
+  const enriched = rows
+    .map(row => {
+      const ret = Number(row.return)
+      const vol = Number(row.volume) || 0
+      let type = 'neutral'
+      if (ret >= 9) type = 'surge'
+      else if (ret <= -6) type = 'drop'
+      else if (vol >= vol90) type = 'volume'
+      return {
+        symbol: row.symbol,
+        name: row.short_name || row.name || '',
+        return: ret,
+        volume: vol,
+        type,
+      }
+    })
+    .filter(item => item.type !== 'neutral')
+    .sort((a,b) => Math.abs(b.return) - Math.abs(a.return))
+    .slice(0, 20)
+  return enriched
 }
 
-onMounted(() => { renderChart() })
-watch([() => props.rows, () => state.factor, () => state.buckets, () => state.metric], () => { renderChart() })
+const anomalies = computed(() => buildAnomalies(analysisRows.value))
+
+const currentPeriodLabel = computed(() => {
+  const found = periodOptions.find(opt => opt.value === panel.period)
+  return found ? found.label : '日'
+})
+
+const portfolioMetrics = computed(() => {
+  if (!state.portfolio.length) return { expected: 0, count: 0, allocation: state.investAmount }
+  const expected = state.portfolio.reduce((sum, item) => sum + (item.expectedReturn * (item.weight / 100)), 0)
+  return {
+    expected,
+    count: state.portfolio.length,
+    allocation: state.portfolio.reduce((sum, item) => sum + item.amount, 0),
+  }
+})
+
+function formatPercent(value, digits = 2){
+  if (!Number.isFinite(Number(value))) return '--'
+  const sign = Number(value) > 0 ? '+' : ''
+  return `${sign}${Number(value).toFixed(digits)}%`
+}
+
+function formatNumber(value){
+  if (!Number.isFinite(Number(value))) return '--'
+  if (Math.abs(value) >= 1_000_000_000) return `${(value/1_000_000_000).toFixed(2)}B`
+  if (Math.abs(value) >= 1_000_000) return `${(value/1_000_000).toFixed(2)}M`
+  if (Math.abs(value) >= 1_000) return `${(value/1_000).toFixed(2)}K`
+  return Number(value).toLocaleString()
+}
+
+function formatCurrency(value){
+  if (!Number.isFinite(Number(value))) return '--'
+  if (Math.abs(value) >= 1_000_000) return `${(value/1_000_000).toFixed(2)} 百萬`
+  if (Math.abs(value) >= 1_000) return `${(value/1_000).toFixed(1)} 千`
+  return Number(value).toLocaleString()
+}
+
+function anomalyLabel(type){
+  return {
+    surge: '急漲',
+    drop: '急跌',
+    volume: '爆量',
+  }[type] || '異常'
+}
+
+function anomalyClass(type){
+  return {
+    surge: 'anomaly-tag--up',
+    drop: 'anomaly-tag--down',
+    volume: 'anomaly-tag--vol',
+  }[type] || 'anomaly-tag--neutral'
+}
+
+function riskLevelClass(value){
+  if (value < 30) return 'risk-bar--low'
+  if (value < 70) return 'risk-bar--mid'
+  return 'risk-bar--high'
+}
+
+watch([analysisRows, () => state.factor, () => state.buckets, () => state.metric], () => {
+  requestAnimationFrame(() => {
+    renderChart()
+  })
+})
+watch(() => [panel.period, panel.market], () => {
+  loadAnalysisData()
+}, { immediate: true })
 onBeforeUnmount(() => { if (chart) { chart.destroy(); chart = null } })
 
-// ====== 投資決策：訊號 ======
 function generateSignals(){
-  const data = Array.isArray(props.rows) ? props.rows : []
+  const data = Array.isArray(analysisRows.value) ? analysisRows.value : []
   if (!data.length) { state.signals = []; return }
   const thresholds = {
     conservative: { buy: 3, sell: -2, volume: 0.8 },
@@ -139,220 +265,371 @@ function generateSignals(){
   }[state.riskTolerance]
   const signals = []
   for (const stock of data){
-    let signal = 'hold'; let strength = 0; let reason = ''
+    let signal = 'hold'
+    let strength = 0
+    let reason = ''
+    const ret = Number(stock.return) || 0
+    const vol = Number(stock.volume) || 0
     if (state.strategyType === 'momentum'){
-      if (Number(stock.return) > thresholds.buy){ signal='buy'; strength=Math.min(100,(stock.return/thresholds.buy)*30); reason=`動量突破 ${Number(stock.return).toFixed(2)}%` }
-      else if (Number(stock.return) < thresholds.sell){ signal='sell'; strength=Math.min(100, Math.abs(stock.return/thresholds.sell)*30); reason=`動量下跌 ${Number(stock.return).toFixed(2)}%` }
+      if (ret > thresholds.buy){ signal = 'buy'; strength = Math.min(100, (ret / thresholds.buy) * 32); reason = `動量突破 ${ret.toFixed(2)}%` }
+      else if (ret < thresholds.sell){ signal = 'sell'; strength = Math.min(100, Math.abs(ret / thresholds.sell) * 32); reason = `動量下跌 ${ret.toFixed(2)}%` }
     } else if (state.strategyType === 'reversal'){
-      if (Number(stock.return) < -5){ signal='buy'; strength=Math.min(100, Math.abs(stock.return)*5); reason=`超跌反彈 ${Number(stock.return).toFixed(2)}%` }
-      else if (Number(stock.return) > 8){ signal='sell'; strength=Math.min(100, Number(stock.return)*4); reason=`漲幅過大 ${Number(stock.return).toFixed(2)}%` }
+      if (ret < -6){ signal = 'buy'; strength = Math.min(100, Math.abs(ret) * 4); reason = `超跌反彈 ${ret.toFixed(2)}%` }
+      else if (ret > 8){ signal = 'sell'; strength = Math.min(100, ret * 4); reason = `漲幅過大 ${ret.toFixed(2)}%` }
     } else if (state.strategyType === 'volume'){
-      const avgVol = data.reduce((s,x)=> s + (Number(x.volume)||0), 0) / Math.max(1,data.length)
-      if ((Number(stock.volume)||0) > avgVol * thresholds.volume && Number(stock.return) > 1){ signal='buy'; strength=Math.min(100, ((Number(stock.volume)||0)/avgVol)*20); reason=`放量上漲 量${((Number(stock.volume)||0)/1e6).toFixed(1)}M` }
+      const avgVol = data.reduce((sum, row) => sum + (Number(row.volume) || 0), 0) / Math.max(1, data.length)
+      if (vol > avgVol * thresholds.volume && ret > 1){ signal = 'buy'; strength = Math.min(100, (vol / Math.max(1, avgVol)) * 18); reason = `放量上漲 ${formatNumber(vol)}` }
     } else if (state.strategyType === 'composite'){
       let score = 0
-      if (Number(stock.return) > 2) score += 30
-      if (Number(stock.return) < -3) score -= 25
-      const avgVol = data.reduce((s,x)=> s + (Number(x.volume)||0), 0) / Math.max(1,data.length)
-      if ((Number(stock.volume)||0) > avgVol*1.5) score += 20
-      if (Number(stock.volatility) < 0.5) score += 10
-      if (score > 35){ signal='buy'; strength=Math.min(100, score); reason=`綜合評分 ${score}` }
-      else if (score < -20){ signal='sell'; strength=Math.min(100, Math.abs(score)); reason=`綜合評分 ${score}` }
+      if (ret > 2) score += 30
+      if (ret < -3) score -= 25
+      const avgVol = data.reduce((sum, row) => sum + (Number(row.volume) || 0), 0) / Math.max(1, data.length)
+      if (vol > avgVol * 1.4) score += 20
+      if ((Number(stock.volatility) || 0) < 0.45) score += 10
+      if (score > 35){ signal = 'buy'; strength = Math.min(100, score); reason = `綜合評分 ${score.toFixed(0)}` }
+      else if (score < -20){ signal = 'sell'; strength = Math.min(100, Math.abs(score)); reason = `綜合評分 ${score.toFixed(0)}` }
     }
-    if (signal !== 'hold') signals.push({ symbol: stock.symbol, signal, strength, reason, return: Number(stock.return)||0, volume: Number(stock.volume)||0 })
+    if (signal !== 'hold'){
+      signals.push({
+        symbol: stock.symbol,
+        name: stock.short_name || stock.name || '',
+        signal,
+        strength,
+        reason,
+      })
+    }
   }
-  state.signals = signals.sort((a,b)=> b.strength - a.strength).slice(0,15)
+  state.signals = signals.sort((a,b) => b.strength - a.strength).slice(0, 8)
 }
 
-// ====== 投資決策：投資組合 ======
 function optimizePortfolio(){
-  const data = Array.isArray(props.rows) ? props.rows : []
-  if (!data.length) { state.portfolio = []; return }
+  const data = Array.isArray(analysisRows.value) ? analysisRows.value : []
+  if (!data.length || !Number.isFinite(Number(state.investAmount))) { state.portfolio = []; return }
   const candidates = data
-    .filter(s => (Number(s.volume)||0) > 1_000_000)
+    .filter(s => (Number(s.volume) || 0) > 800_000)
     .map(s => ({
       ...s,
-      score: (Number(s.return)||0) / Math.max(0.1, Number(s.volatility)||0.1),
-      liquidity: Math.min(100, (Number(s.volume)||0) / 10_000_000 * 100)
+      score: (Number(s.return) || 0) / Math.max(0.2, Number(s.volatility) || 0.2),
     }))
-    .sort((a,b)=> b.score - a.score)
-    .slice(0, Math.max(1, Number(state.maxStocks)||10))
-  const totalScore = candidates.reduce((sum,s)=> sum + Math.max(0, s.score), 0)
+    .sort((a,b) => b.score - a.score)
+    .slice(0, Math.max(1, Number(state.maxStocks) || 10))
+  const totalScore = candidates.reduce((sum, item) => sum + Math.max(0, item.score), 0)
   let portfolio = candidates.map(stock => {
-    const baseWeight = totalScore > 0 ? (Math.max(0, stock.score) / totalScore) * 100 : (100 / candidates.length)
-    const weight = Math.min(Number(state.maxWeight)||20, Math.max(5, baseWeight))
-    const amount = Number(state.investAmount||0) * (weight / 100)
-    return { symbol: stock.symbol, weight, amount, expectedReturn: Number(stock.return)||0, risk: Number(stock.volatility)||0, score: stock.score }
+    const weight = totalScore > 0
+      ? Math.min(Number(state.maxWeight) || 20, Math.max(5, (Math.max(0, stock.score) / totalScore) * 100))
+      : (100 / Math.max(1, candidates.length))
+    const amount = Number(state.investAmount || 0) * (weight / 100)
+    return {
+      symbol: stock.symbol,
+      name: stock.short_name || stock.name || '',
+      weight,
+      amount,
+      expectedReturn: Number(stock.return) || 0,
+    }
   })
-  const totalWeight = portfolio.reduce((s,p)=> s + p.weight, 0)
-  portfolio = portfolio.map(p => ({ ...p, weight: p.weight / totalWeight * 100, amount: Number(state.investAmount||0) * (p.weight/100) }))
+  const totalWeight = portfolio.reduce((sum, item) => sum + item.weight, 0)
+  portfolio = portfolio.map(item => {
+    const adjustedWeight = totalWeight > 0 ? (item.weight / totalWeight) * 100 : item.weight
+    const adjustedAmount = Number(state.investAmount || 0) * (adjustedWeight / 100)
+    return { ...item, weight: adjustedWeight, amount: adjustedAmount }
+  })
   state.portfolio = portfolio
 }
 
-// ====== 投資決策：風險評估 ======
 function assessRisk(){
-  const data = Array.isArray(props.rows) ? props.rows : []
-  if (!data.length) { state.riskBars = { market:0, concentration:0, liquidity:0 }; return }
-  const returns = data.map(s => Number(s.return)||0)
-  const marketRisk = Math.abs(returns.reduce((sum,r)=> sum + r, 0)/Math.max(1,returns.length)) * 5
-  const concentrationRisk = (data.filter(s => (Number(s.volume)||0) < 5_000_000).length / data.length) * 100
-  const liquidityRisk = (data.filter(s => (Number(s.volume)||0) < 1_000_000).length / data.length) * 100
+  const data = Array.isArray(analysisRows.value) ? analysisRows.value : []
+  if (!data.length){
+    state.riskBars = { market: 0, concentration: 0, liquidity: 0 }
+    return
+  }
+  const returns = data.map(item => Number(item.return) || 0)
+  const avgReturn = returns.reduce((sum, val) => sum + val, 0) / Math.max(1, returns.length)
+  const marketRisk = Math.min(100, Math.abs(avgReturn) * 6)
+  const concentrationRisk = Math.min(100, (data.filter(item => (Number(item.volume) || 0) < 3_000_000).length / data.length) * 100)
+  const liquidityRisk = Math.min(100, (data.filter(item => (Number(item.volume) || 0) < 1_000_000).length / data.length) * 100)
   state.riskBars = {
-    market: Math.min(100, Math.max(0, marketRisk)),
-    concentration: Math.min(100, Math.max(0, concentrationRisk)),
-    liquidity: Math.min(100, Math.max(0, liquidityRisk)),
+    market: marketRisk,
+    concentration: concentrationRisk,
+    liquidity: liquidityRisk,
   }
 }
 
-function fmtPct(v){ return `${Number(v).toFixed(1)}%` }
+function fmtPct(value, digits = 1){
+  if (!Number.isFinite(Number(value))) return '--'
+  return `${Number(value).toFixed(digits)}%`
+}
 
 </script>
 
 <template>
   <section class="analysis-section">
-    <div class="analysis-tools">
-      <div class="analysis-card quant-bars">
-        <h3 style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;">
-          <span><i class="fas fa-chart-bar"></i> 量化分組柱狀圖</span>
-          <span style="gap:.5rem;opacity:.95;" class="factor-controls">
-            <label style="font-size:.85rem;color:var(--text-secondary)">因子</label>
-            <select v-model="state.factor" class="filter-input" style="width:120px;padding:.4rem .6rem;">
-              <option value="return">報酬</option>
-              <option value="volume">成交量</option>
-              <option value="volatility">波動</option>
-            </select>
-            <label style="font-size:.85rem;color:var(--text-secondary)">組數</label>
-            <select v-model.number="state.buckets" class="filter-input" style="width:110px;padding:.4rem .6rem;">
-              <option :value="10">10 (Decile)</option>
-              <option :value="5">5 (Quintile)</option>
-            </select>
-            <label style="font-size:.85rem;color:var(--text-secondary)">度量</label>
-            <select v-model="state.metric" class="filter-input" style="width:130px;padding:.4rem .6rem;">
-              <option value="avg">平均報酬</option>
-              <option value="ir">IR</option>
-            </select>
-          </span>
-        </h3>
-        <div id="quantBarWrap" style="height:300px;margin-top:10px;">
-          <canvas id="quantBarCanvas" height="300"></canvas>
+    <div class="analysis-header">
+      <div class="analysis-header-panel">
+        <div class="analysis-title">
+          <div class="analysis-title__left">
+            <i class="fas fa-chart-line"></i>
+            <div>
+              <span class="analysis-title__main">深度分析</span>
+              <span class="analysis-title__sub">依照因子分組觀察市場結構</span>
+            </div>
+          </div>
+          <span class="analysis-period-badge">當前週期：{{ currentPeriodLabel }}</span>
+        </div>
+        <div class="analysis-toolbar">
+          <span class="toolbar-title"><i class="fas fa-sliders-h"></i> 分析條件</span>
+          <div class="analysis-filters">
+            <div class="analysis-filter period-filter">
+              <label>週期</label>
+              <div class="period-buttons">
+                <button
+                  v-for="item in periodOptions"
+                  :key="item.value"
+                  type="button"
+                  class="period-chip"
+                  :class="{ active: panel.period === item.value }"
+                  @click="panel.period = item.value"
+                >{{ item.label }}</button>
+              </div>
+            </div>
+            <div class="analysis-filter">
+              <label>市場別</label>
+              <select
+                class="filter-input"
+                v-model="panel.market"
+              >
+                <option value="all">全部市場</option>
+                <option value="listed">上市</option>
+                <option value="otc">上櫃</option>
+              </select>
+            </div>
+            <div class="analysis-filter">
+              <label>因子</label>
+              <select v-model="state.factor" class="filter-input">
+                <option value="return">報酬</option>
+                <option value="volume">成交量</option>
+                <option value="volatility">波動</option>
+              </select>
+            </div>
+            <div class="analysis-filter">
+              <label>組數</label>
+              <select v-model.number="state.buckets" class="filter-input">
+                <option :value="10">10 (Decile)</option>
+                <option :value="5">5 (Quintile)</option>
+              </select>
+            </div>
+            <div class="analysis-filter">
+              <label>度量</label>
+              <select v-model="state.metric" class="filter-input">
+                <option value="avg">平均報酬</option>
+                <option value="ir">IR</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="analysis-layout">
+      <div class="analysis-card chart-card">
+        <transition name="fade">
+          <div v-if="loading" class="analysis-loading">
+            <div class="spinner"></div>
+            <span>載入中…</span>
+          </div>
+        </transition>
+        <div class="card-header">
+          <div class="card-title">
+            <i class="fas fa-signal"></i>
+            量化分組柱狀圖
+          </div>
+          <div class="card-subtitle">掌握不同分組的報酬輪動</div>
+        </div>
+        <div id="quantBarWrap" class="chart-wrapper">
+          <canvas id="quantBarCanvas" height="320"></canvas>
         </div>
       </div>
 
-      <div class="analysis-card">
-        <h3><i class="fas fa-exclamation-triangle"></i> 市場異常</h3>
-        <div class="anomaly-list" style="max-height:360px; overflow:auto;">
-          <template v-if="computeAnomalies().length">
-            <div v-for="it in computeAnomalies()" :key="it.symbol + '-' + it.type" class="anomaly-item">
-              <div class="anomaly-left">
-                <span class="badge" :class="it.type==='up'?'up':it.type==='down'?'down':'vol'">{{ it.type==='up'?'急漲':it.type==='down'?'急跌':'爆量' }}</span>
-                <strong>{{ it.symbol }}</strong>
-              </div>
-              <div class="anomaly-right">{{ Number(it.return).toFixed(2) }}%<span v-if="it.volume"> · 量 {{ Number(it.volume).toLocaleString() }}</span></div>
-            </div>
-          </template>
-          <div v-else class="muted">無資料</div>
-        </div>
-      </div>
-      
-      <!-- 投資決策：買賣訊號 -->
-      <div class="analysis-card">
-        <h3><i class="fas fa-signal"></i> 買賣訊號</h3>
-        <div class="signal-controls">
-          <div class="signal-params">
-            <label>策略類型：</label>
-            <select v-model="state.strategyType" class="filter-input">
-              <option value="momentum">動量策略</option>
-              <option value="reversal">反轉策略</option>
-              <option value="volume">成交量突破</option>
-              <option value="composite">綜合訊號</option>
-            </select>
+      <div class="analysis-card anomaly-card">
+        <div class="card-header">
+          <div class="card-title">
+            <i class="fas fa-exclamation-triangle"></i>
+            市場異常
           </div>
-          <div class="signal-params">
-            <label>風險偏好：</label>
-            <select v-model="state.riskTolerance" class="filter-input">
-              <option value="conservative">保守型</option>
-              <option value="moderate">穩健型</option>
-              <option value="aggressive">積極型</option>
-            </select>
-          </div>
-          <button class="btn-primary" @click="generateSignals"><i class="fas fa-magic"></i> 生成訊號</button>
+          <div class="card-subtitle">依報酬與量能挑選的關鍵個股</div>
         </div>
-        <div class="signal-results">
-          <template v-if="state.signals.length">
-            <div v-for="s in state.signals" :key="s.symbol + '-' + s.signal" class="signal-item" :class="s.signal">
-              <div>
-                <strong>{{ s.symbol }}</strong>
-                <span class="signal-action">{{ s.signal==='buy'?'買入':'賣出' }}</span>
-                <div class="signal-reason">{{ s.reason }}</div>
+        <div class="anomaly-list" v-if="anomalies.length">
+          <div
+            v-for="item in anomalies"
+            :key="item.symbol + item.type"
+            class="anomaly-item"
+          >
+            <div class="anomaly-item__left">
+              <span class="anomaly-tag" :class="anomalyClass(item.type)">{{ anomalyLabel(item.type) }}</span>
+              <div class="anomaly-symbol">
+                <strong>{{ item.symbol }}</strong>
+                <span class="anomaly-name" v-if="item.name">{{ item.name }}</span>
               </div>
-              <div class="signal-strength">{{ Math.round(s.strength) }}%</div>
             </div>
-          </template>
-          <div v-else class="muted">請選擇策略參數並生成訊號</div>
+            <div class="anomaly-item__right">
+              <span class="anomaly-return" :class="{ positive: item.return >= 0, negative: item.return < 0 }">{{ formatPercent(item.return) }}</span>
+              <span class="anomaly-volume" v-if="item.volume">量 {{ formatNumber(item.volume) }}</span>
+            </div>
+          </div>
         </div>
+        <div v-else class="analysis-empty">目前沒有符合條件的異常個股</div>
       </div>
 
-      <!-- 投資決策：投資組合 -->
-      <div class="analysis-card">
-        <h3><i class="fas fa-chart-pie"></i> 投資組合建議</h3>
-        <div class="portfolio-controls">
-          <div class="portfolio-params">
-            <label>投資金額：</label>
-            <input type="number" v-model.number="state.investAmount" class="filter-input" placeholder="1000000">
-          </div>
-          <div class="portfolio-params">
-            <label>最大持股數：</label>
-            <input type="number" v-model.number="state.maxStocks" class="filter-input" placeholder="10" min="3" max="20">
-          </div>
-          <div class="portfolio-params">
-            <label>單股上限：</label>
-            <input type="number" v-model.number="state.maxWeight" class="filter-input" placeholder="20" min="5" max="50">
-            <span>%</span>
-          </div>
-          <button class="btn-primary" @click="optimizePortfolio"><i class="fas fa-calculator"></i> 優化組合</button>
-        </div>
-        <div class="portfolio-results">
-          <template v-if="state.portfolio.length">
-            <div class="portfolio-summary">
-              <div class="portfolio-metric"><span>預期報酬：</span><span>{{ fmtPct(state.portfolio.reduce((sum,p)=> sum + (p.expectedReturn * p.weight/100), 0)) }}</span></div>
-              <div class="portfolio-metric"><span>組合風險：</span><span>{{ fmtPct(Math.sqrt(state.portfolio.reduce((s,p)=> s + Math.pow(p.risk * p.weight/100, 2), 0))) }}</span></div>
+      <div class="analysis-card decision-card">
+        <div class="decision-grid">
+          <section class="decision-panel">
+            <header class="decision-panel__header">
+              <div class="decision-panel__title">
+                <i class="fas fa-broadcast-tower"></i>
+                買賣訊號
+              </div>
+              <span class="decision-panel__caption">選擇策略參數後產生提示</span>
+            </header>
+            <div class="decision-panel__body">
+              <div class="form-grid">
+                <label class="form-field">
+                  <span>策略類型</span>
+                  <select v-model="state.strategyType" class="filter-input">
+                    <option value="momentum">動量策略</option>
+                    <option value="reversal">反轉策略</option>
+                    <option value="volume">成交量突破</option>
+                    <option value="composite">綜合訊號</option>
+                  </select>
+                </label>
+                <label class="form-field">
+                  <span>風險傾向</span>
+                  <select v-model="state.riskTolerance" class="filter-input">
+                    <option value="conservative">保守型</option>
+                    <option value="moderate">穩健型</option>
+                    <option value="aggressive">積極型</option>
+                  </select>
+                </label>
+              </div>
+              <button class="decision-button" @click="generateSignals">
+                <span>生成訊號</span>
+                <i class="fas fa-magic"></i>
+              </button>
+              <div class="signal-board">
+                <template v-if="state.signals.length">
+                  <div v-for="signal in state.signals" :key="signal.symbol + signal.signal" class="signal-card" :class="signal.signal">
+                    <div class="signal-card__symbol">
+                      <strong>{{ signal.symbol }}</strong>
+                      <span v-if="signal.name">{{ signal.name }}</span>
+                    </div>
+                    <div class="signal-card__meta">
+                      <span class="signal-tag" :class="signal.signal==='buy' ? 'signal-tag--buy' : 'signal-tag--sell'">{{ signal.signal==='buy' ? '買進' : '賣出' }}</span>
+                      <span class="signal-strength">{{ Math.round(signal.strength) }}%</span>
+                    </div>
+                    <div class="signal-card__reason">{{ signal.reason }}</div>
+                  </div>
+                </template>
+                <div v-else class="signal-empty">請設定參數並生成訊號</div>
+              </div>
             </div>
-            <div class="portfolio-holdings">
-              <div class="portfolio-item" v-for="p in state.portfolio" :key="p.symbol">
-                <div>
-                  <strong>{{ p.symbol }}</strong>
-                  <div class="holding-details">權重 {{ p.weight.toFixed(1) }}% · 金額 {{ (p.amount/10000).toFixed(0) }}萬</div>
+          </section>
+
+          <section class="decision-panel">
+            <header class="decision-panel__header">
+              <div class="decision-panel__title">
+                <i class="fas fa-chart-pie"></i>
+                投資組合建議
+              </div>
+              <span class="decision-panel__caption">設定投入金額與限制</span>
+            </header>
+            <div class="decision-panel__body">
+              <div class="form-grid">
+                <label class="form-field">
+                  <span>投資金額</span>
+                  <input type="number" v-model.number="state.investAmount" class="filter-input" min="100000" step="100000">
+                </label>
+                <label class="form-field">
+                  <span>最大持股數</span>
+                  <input type="number" v-model.number="state.maxStocks" class="filter-input" min="3" max="20">
+                </label>
+                <label class="form-field">
+                  <span>單股上限 (%)</span>
+                  <input type="number" v-model.number="state.maxWeight" class="filter-input" min="5" max="40">
+                </label>
+              </div>
+              <button class="decision-button" @click="optimizePortfolio">
+                <span>優化組合</span>
+                <i class="fas fa-sliders-h"></i>
+              </button>
+              <div class="portfolio-board">
+                <div class="portfolio-summary">
+                  <div class="summary-item">
+                    <span>預期報酬</span>
+                    <strong>{{ fmtPct(portfolioMetrics.expected, 1) }}</strong>
+                  </div>
+                  <div class="summary-item">
+                    <span>持股數量</span>
+                    <strong>{{ portfolioMetrics.count }}</strong>
+                  </div>
+                  <div class="summary-item">
+                    <span>資金配置</span>
+                    <strong>{{ formatCurrency(portfolioMetrics.allocation) }}</strong>
+                  </div>
                 </div>
-                <div class="holding-return" :class="p.expectedReturn>=0?'positive':'negative'">{{ fmtPct(p.expectedReturn) }}</div>
+                <div class="portfolio-list" v-if="state.portfolio.length">
+                  <div v-for="stock in state.portfolio" :key="stock.symbol" class="portfolio-item">
+                    <div class="portfolio-item__symbol">
+                      <strong>{{ stock.symbol }}</strong>
+                      <span v-if="stock.name">{{ stock.name }}</span>
+                    </div>
+                    <div class="portfolio-item__meta">
+                      <span class="meta-chip">{{ stock.weight.toFixed(1) }}%</span>
+                      <span class="meta-chip">{{ formatCurrency(stock.amount) }}</span>
+                    </div>
+                    <span class="portfolio-return" :class="{ positive: stock.expectedReturn >= 0, negative: stock.expectedReturn < 0 }">{{ fmtPct(stock.expectedReturn, 1) }}</span>
+                  </div>
+                </div>
+                <div v-else class="portfolio-empty">設定參數後點擊優化組合</div>
               </div>
             </div>
-          </template>
-          <div v-else class="muted">設定參數後點擊優化組合</div>
-        </div>
-      </div>
+          </section>
 
-      <!-- 投資決策：風險評估 -->
-      <div class="analysis-card">
-        <h3><i class="fas fa-shield-alt"></i> 風險評估</h3>
-        <div class="risk-metrics">
-          <div class="risk-metric"><span class="metric-label">市場風險</span><div class="risk-bar"><div class="risk-fill" :style="{width: state.riskBars.market + '%', background: state.riskBars.market<30?'var(--success)':state.riskBars.market<70?'var(--warning)':'var(--error)'}"></div></div><span class="metric-value">{{ fmtPct(state.riskBars.market) }}</span></div>
-          <div class="risk-metric"><span class="metric-label">集中度風險</span><div class="risk-bar"><div class="risk-fill" :style="{width: state.riskBars.concentration + '%', background: state.riskBars.concentration<30?'var(--success)':state.riskBars.concentration<70?'var(--warning)':'var(--error)'}"></div></div><span class="metric-value">{{ fmtPct(state.riskBars.concentration) }}</span></div>
-          <div class="risk-metric"><span class="metric-label">流動性風險</span><div class="risk-bar"><div class="risk-fill" :style="{width: state.riskBars.liquidity + '%', background: state.riskBars.liquidity<30?'var(--success)':state.riskBars.liquidity<70?'var(--warning)':'var(--error)'}"></div></div><span class="metric-value">{{ fmtPct(state.riskBars.liquidity) }}</span></div>
-        </div>
-        <button class="btn-primary" @click="assessRisk"><i class="fas fa-search"></i> 評估風險</button>
-      </div>
-
-      <!-- 投資決策：執行建議 -->
-      <div class="analysis-card full-width">
-        <h3><i class="fas fa-clipboard-list"></i> 執行建議</h3>
-        <div class="action-plan">
-          <ul>
-            <li v-if="state.signals.length"><strong>訊號執行：</strong>優先關注強度>70%的買賣訊號，建議分批進出</li>
-            <li v-if="state.portfolio.length"><strong>組合配置：</strong>按建議權重配置，單筆投入不超過總資金20%</li>
-            <li><strong>風險控制：</strong><span v-if="state.riskBars.market>50">當前市場風險較高，建議降低倉位或增加避險部位</span><span v-else>風險水平可控，可按正常策略執行</span></li>
-            <li><strong>監控要點：</strong>密切關注成交量變化和技術指標確認</li>
-            <li><strong>停損設定：</strong>建議設定-8%停損點，+15%分批獲利了結</li>
-          </ul>
+          <section class="decision-panel">
+            <header class="decision-panel__header">
+              <div class="decision-panel__title">
+                <i class="fas fa-heartbeat"></i>
+                風險評估
+              </div>
+              <span class="decision-panel__caption">量化市場、集中與流動風險</span>
+            </header>
+            <div class="decision-panel__body">
+              <ul class="risk-list">
+                <li class="risk-item">
+                  <span>市場風險</span>
+                  <div class="risk-bar" :class="riskLevelClass(state.riskBars.market)">
+                    <div class="risk-bar__fill" :style="{ width: state.riskBars.market + '%' }"></div>
+                  </div>
+                  <strong>{{ fmtPct(state.riskBars.market, 1) }}</strong>
+                </li>
+                <li class="risk-item">
+                  <span>集中度風險</span>
+                  <div class="risk-bar" :class="riskLevelClass(state.riskBars.concentration)">
+                    <div class="risk-bar__fill" :style="{ width: state.riskBars.concentration + '%' }"></div>
+                  </div>
+                  <strong>{{ fmtPct(state.riskBars.concentration, 1) }}</strong>
+                </li>
+                <li class="risk-item">
+                  <span>流動性風險</span>
+                  <div class="risk-bar" :class="riskLevelClass(state.riskBars.liquidity)">
+                    <div class="risk-bar__fill" :style="{ width: state.riskBars.liquidity + '%' }"></div>
+                  </div>
+                  <strong>{{ fmtPct(state.riskBars.liquidity, 1) }}</strong>
+                </li>
+              </ul>
+              <button class="decision-button" @click="assessRisk">
+                <span>評估風險</span>
+                <i class="fas fa-search"></i>
+              </button>
+            </div>
+          </section>
         </div>
       </div>
     </div>

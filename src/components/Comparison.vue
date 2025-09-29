@@ -45,7 +45,7 @@ onMounted(loadSelection)
 </script>
 
 <template>
-  <section class="comparison-section" id="comparisonSection" style="display:none">
+  <section class="comparison-section" id="comparisonSection">
     <div class="comparison-grid">
       <div class="comparison-card" id="comparisonSettingsCard">
         <h3><i class="fas fa-balance-scale"></i> 比較設定</h3>

@@ -1,5 +1,5 @@
 <template>
-  <section class="alerts-section" id="alertsSection" style="display:none">
+  <section class="alerts-section" id="alertsSection">
     <div class="alerts-grid">
       <div class="alerts-card">
         <h3><i class="fas fa-bell-plus"></i> 新增警示規則</h3>
