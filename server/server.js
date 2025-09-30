@@ -116,10 +116,11 @@ app.get('/api/returns/statistics', async (req, res) => {
           r.symbol,
           r.date,
           COALESCE(r.daily_return, 0)::numeric AS daily_return,
-          COALESCE(p.volume, 0)::numeric AS volume,
+          COALESCE(sp.volume, 0)::numeric AS volume,
+          COALESCE(sp.close_price, 0)::numeric AS close_price,
           ROW_NUMBER() OVER (PARTITION BY r.symbol ORDER BY r.date DESC) AS rn
         FROM stock_returns r
-        LEFT JOIN stock_prices p ON p.symbol = r.symbol AND p.date = r.date
+        LEFT JOIN stock_prices sp ON sp.symbol = r.symbol AND sp.date = r.date
         LEFT JOIN stock_symbols s ON s.symbol = r.symbol
         WHERE r.date <= $1::date
           AND (
@@ -130,18 +131,72 @@ app.get('/api/returns/statistics', async (req, res) => {
       aggregated AS (
         SELECT
           symbol,
-          SUM(daily_return) FILTER (WHERE rn <= $3)::numeric AS period_return,
-          MAX(volume) FILTER (WHERE rn = 1)::numeric AS latest_volume
+          SUM(
+            CASE
+              WHEN rn BETWEEN 1 AND $3 AND (1 + daily_return) > 0 THEN LN(1 + daily_return)
+              ELSE 0
+            END
+          ) AS log_return_sum,
+          BOOL_AND(
+            CASE
+              WHEN rn BETWEEN 1 AND $3 THEN (1 + daily_return) > 0
+              ELSE TRUE
+            END
+          ) AS all_positive_returns,
+          COUNT(*) FILTER (WHERE rn BETWEEN 1 AND $3) AS window_count,
+          MAX(volume) FILTER (WHERE rn = 1)::numeric AS latest_volume,
+          MAX(close_price) FILTER (WHERE rn = 1)::numeric AS latest_close,
+          MAX(close_price) FILTER (WHERE rn = $3 + 1)::numeric AS prior_close,
+          MAX(daily_return) FILTER (WHERE rn = 1)::numeric AS latest_daily_return,
+          BOOL_OR(
+            CASE
+              WHEN rn = $3 + 1 AND close_price IS NOT NULL AND close_price > 0 THEN TRUE
+              ELSE FALSE
+            END
+          ) AS has_prior_close
         FROM base
-        WHERE rn <= $3
+        WHERE rn <= $3 + 1
         GROUP BY symbol
+      ),
+      prior_price AS (
+        SELECT
+          sp.symbol,
+          sp.close_price AS price_before_window,
+          sp.date AS price_date
+        FROM (
+          SELECT DISTINCT ON (sp.symbol)
+            sp.symbol,
+            sp.close_price,
+            sp.date
+          FROM stock_prices sp
+          LEFT JOIN stock_symbols s ON s.symbol = sp.symbol
+          WHERE sp.date < $1::date
+            AND (
+              $2::text = 'all'
+              OR s.market = $2::text
+            )
+          ORDER BY sp.symbol, sp.date DESC
+        ) sp
       ),
       returns AS (
         SELECT
           a.symbol,
-          COALESCE(a.period_return, 0)::numeric AS period_return,
-          COALESCE(a.latest_volume, 0)::numeric AS volume
+          CASE
+            WHEN $3 = 1 AND a.latest_daily_return IS NOT NULL THEN a.latest_daily_return
+            WHEN a.has_prior_close THEN (a.latest_close / a.prior_close) - 1
+            WHEN a.window_count = $3 AND a.all_positive_returns THEN EXP(a.log_return_sum) - 1
+            WHEN pp.price_before_window IS NOT NULL AND pp.price_before_window > 0 THEN (a.latest_close / pp.price_before_window) - 1
+            ELSE NULL
+          END AS period_return,
+          COALESCE(a.latest_volume, 0)::numeric AS volume,
+          COALESCE(a.latest_close, 0)::numeric AS latest_close,
+          CASE
+            WHEN a.has_prior_close THEN a.prior_close
+            WHEN a.window_count = $3 AND a.all_positive_returns THEN a.latest_close / NULLIF(EXP(a.log_return_sum), 0)
+            ELSE pp.price_before_window
+          END AS prior_close
         FROM aggregated a
+        LEFT JOIN prior_price pp ON pp.symbol = a.symbol
       ),
       price_today AS (
         SELECT
@@ -264,14 +319,19 @@ app.get('/api/returns/statistics', async (req, res) => {
     `;
     const stat = await client.query(metricsSql, [isoDate, (market || 'all'), windowDays] );
 
+    const topWindowDays = periodKey === 'daily' ? 20 : windowDays;
+
     const topSql = `
       WITH base AS (
         SELECT
           r.symbol,
           r.date,
           COALESCE(r.daily_return, 0)::numeric AS daily_return,
+          COALESCE(sp.close_price, 0)::numeric AS close_price,
+          COALESCE(sp.volume, 0)::numeric AS volume,
           ROW_NUMBER() OVER (PARTITION BY r.symbol ORDER BY r.date DESC) AS rn
         FROM stock_returns r
+        LEFT JOIN stock_prices sp ON sp.symbol = r.symbol AND sp.date = r.date
         LEFT JOIN stock_symbols s ON s.symbol = r.symbol
         WHERE r.date <= $1::date
           AND (
@@ -282,24 +342,78 @@ app.get('/api/returns/statistics', async (req, res) => {
       aggregated AS (
         SELECT
           symbol,
-          SUM(daily_return) FILTER (WHERE rn <= $3)::numeric AS period_return
+          SUM(
+            CASE
+              WHEN rn BETWEEN 1 AND $3 AND (1 + daily_return) > 0 THEN LN(1 + daily_return)
+              ELSE 0
+            END
+          ) AS log_return_sum,
+          BOOL_AND(
+            CASE
+              WHEN rn BETWEEN 1 AND $3 THEN (1 + daily_return) > 0
+              ELSE TRUE
+            END
+          ) AS all_positive_returns,
+          COUNT(*) FILTER (WHERE rn BETWEEN 1 AND $3) AS window_count,
+          MAX(volume) FILTER (WHERE rn = 1)::numeric AS latest_volume,
+          MAX(close_price) FILTER (WHERE rn = 1)::numeric AS latest_close,
+          MAX(close_price) FILTER (WHERE rn = $3 + 1)::numeric AS prior_close,
+          MAX(daily_return) FILTER (WHERE rn = 1)::numeric AS latest_daily_return,
+          BOOL_OR(
+            CASE
+              WHEN rn = $3 + 1 AND close_price IS NOT NULL AND close_price > 0 THEN TRUE
+              ELSE FALSE
+            END
+          ) AS has_prior_close
         FROM base
-        WHERE rn <= $3
+        WHERE rn <= $3 + 1
         GROUP BY symbol
+      ),
+      prior_price AS (
+        SELECT
+          sp.symbol,
+          sp.close_price AS price_before_window,
+          sp.date AS price_date
+        FROM (
+          SELECT DISTINCT ON (sp.symbol)
+            sp.symbol,
+            sp.close_price,
+            sp.date
+          FROM stock_prices sp
+          LEFT JOIN stock_symbols s ON s.symbol = sp.symbol
+          WHERE sp.date < $1::date
+            AND (
+              $2::text = 'all'
+              OR s.market = $2::text
+            )
+          ORDER BY sp.symbol, sp.date DESC
+        ) sp
       )
       SELECT
         a.symbol,
-        a.period_return,
-        COALESCE(sp.volume, 0)::numeric AS volume,
-        COALESCE(sp.close_price, 0)::numeric AS close_price,
-        COALESCE(prev.close_price, 0)::numeric AS prior_close
+        CASE
+          WHEN $3 = 1 AND a.latest_daily_return IS NOT NULL THEN a.latest_daily_return
+          WHEN a.has_prior_close THEN (a.latest_close / a.prior_close) - 1
+          WHEN a.window_count = $3 AND a.all_positive_returns THEN EXP(a.log_return_sum) - 1
+          WHEN pp.price_before_window IS NOT NULL AND pp.price_before_window > 0 THEN (a.latest_close / pp.price_before_window) - 1
+          ELSE NULL
+        END AS period_return,
+        a.latest_volume AS volume,
+        a.latest_close AS close_price,
+        COALESCE(
+          CASE
+            WHEN a.has_prior_close THEN a.prior_close
+            WHEN a.window_count = $3 AND a.all_positive_returns THEN a.latest_close / NULLIF(EXP(a.log_return_sum), 0)
+            ELSE pp.price_before_window
+          END,
+          0
+        ) AS prior_close
       FROM aggregated a
-      LEFT JOIN stock_prices sp ON sp.symbol = a.symbol AND sp.date = $1::date
-      LEFT JOIN stock_prices prev ON prev.symbol = a.symbol AND prev.date = $1::date - ($3::int) * INTERVAL '1 day'
-      ORDER BY a.period_return DESC NULLS LAST
+      LEFT JOIN prior_price pp ON pp.symbol = a.symbol
+      ORDER BY period_return DESC NULLS LAST
       LIMIT 1
     `;
-    const top = await client.query(topSql, [isoDate, (market || 'all'), windowDays]);
+    const top = await client.query(topSql, [isoDate, (market || 'all'), topWindowDays]);
 
     const aggregate = stat.rows[0] || {};
     const t = top.rows[0] || null;
@@ -332,8 +446,10 @@ app.get('/api/returns/statistics', async (req, res) => {
     const ma20TrendPercent = ma20Ratio - ma60Ratio;
     const topVolume = Number(t?.volume || 0);
     const topPrice = Number(t?.close_price || 0);
-    const topPricePrev = Number(t?.close_price_20 || 0);
-    const topReturn = t && t.return_20 !== null && t.return_20 !== undefined ? Number(t.return_20) : 0;
+    const topPricePrev = Number(t?.prior_close || 0);
+    const topReturn = t && t.period_return !== null && t.period_return !== undefined
+      ? Number(t.period_return) * 100
+      : 0;
 
     res.json({
       data: {
@@ -416,8 +532,11 @@ app.get('/api/returns/rankings', async (req, res) => {
           r.symbol,
           r.date,
           COALESCE(r.daily_return, 0)::numeric AS daily_return,
+          COALESCE(sp.close_price, 0)::numeric AS close_price,
+          COALESCE(sp.volume, 0)::numeric AS volume,
           ROW_NUMBER() OVER (PARTITION BY r.symbol ORDER BY r.date DESC) AS rn
         FROM stock_returns r
+        LEFT JOIN stock_prices sp ON sp.symbol = r.symbol AND sp.date = r.date
         LEFT JOIN stock_symbols s ON s.symbol = r.symbol
         WHERE r.date <= $1::date
           AND (
@@ -428,27 +547,96 @@ app.get('/api/returns/rankings', async (req, res) => {
       aggregated AS (
         SELECT
           symbol,
-          SUM(daily_return) FILTER (WHERE rn <= $3)::numeric AS period_return
+          SUM(
+            CASE
+              WHEN rn BETWEEN 1 AND $3 AND (1 + daily_return) > 0 THEN LN(1 + daily_return)
+              ELSE 0
+            END
+          ) AS log_return_sum,
+          BOOL_AND(
+            CASE
+              WHEN rn BETWEEN 1 AND $3 THEN (1 + daily_return) > 0
+              ELSE TRUE
+            END
+          ) AS all_positive_returns,
+          COUNT(*) FILTER (WHERE rn BETWEEN 1 AND $3) AS window_count,
+          MAX(volume) FILTER (WHERE rn = 1)::numeric AS latest_volume,
+          MAX(close_price) FILTER (WHERE rn = 1)::numeric AS latest_close,
+          MAX(close_price) FILTER (WHERE rn = $3 + 1)::numeric AS prior_close,
+          MAX(daily_return) FILTER (WHERE rn = 1)::numeric AS latest_daily_return,
+          BOOL_OR(
+            CASE
+              WHEN rn = $3 + 1 AND close_price IS NOT NULL AND close_price > 0 THEN TRUE
+              ELSE FALSE
+            END
+          ) AS has_prior_close
         FROM base
-        WHERE rn <= $3
+        WHERE rn <= $3 + 1
         GROUP BY symbol
+      ),
+      prior_price AS (
+        SELECT
+          sp.symbol,
+          sp.close_price AS price_before_window,
+          sp.date AS price_date
+        FROM (
+          SELECT DISTINCT ON (sp.symbol)
+            sp.symbol,
+            sp.close_price,
+            sp.date
+          FROM stock_prices sp
+          LEFT JOIN stock_symbols s ON s.symbol = sp.symbol
+          WHERE sp.date < $1::date
+            AND (
+              $2::text = 'all'
+              OR s.market = $2::text
+            )
+          ORDER BY sp.symbol, sp.date DESC
+        ) sp
       )
       SELECT
         a.symbol,
         $1::date AS latest_date,
-        COALESCE(a.period_return, 0) AS latest_return_pct,
-        COALESCE(p.volume, 0) AS volume,
-        COALESCE(p.close_price, 0) AS current_price,
-        COALESCE(p.change, 0) AS price_change,
-        COALESCE(p.change_percent, 0) AS change_percent,
+        CASE
+          WHEN $3 = 1 AND a.latest_daily_return IS NOT NULL THEN a.latest_daily_return
+          WHEN a.has_prior_close THEN (a.latest_close / a.prior_close) - 1
+          WHEN a.window_count = $3 AND a.all_positive_returns THEN EXP(a.log_return_sum) - 1
+          WHEN pp.price_before_window IS NOT NULL AND pp.price_before_window > 0 THEN (a.latest_close / pp.price_before_window) - 1
+          ELSE NULL
+        END AS latest_return_pct,
+        COALESCE(sp.volume, a.latest_volume, 0) AS volume,
+        COALESCE(sp.close_price, a.latest_close, 0) AS current_price,
+        COALESCE(
+          CASE
+            WHEN a.has_prior_close THEN a.prior_close
+            WHEN a.window_count = $3 AND a.all_positive_returns THEN a.latest_close / NULLIF(EXP(a.log_return_sum), 0)
+            ELSE pp.price_before_window
+          END,
+          prev.close_price,
+          0
+        ) AS prior_close,
+        CASE
+          WHEN a.has_prior_close THEN a.latest_close - a.prior_close
+          WHEN a.window_count = $3 AND a.all_positive_returns THEN a.latest_close - (a.latest_close / NULLIF(EXP(a.log_return_sum), 0))
+          WHEN pp.price_before_window IS NOT NULL AND pp.price_before_window > 0 THEN a.latest_close - pp.price_before_window
+          ELSE COALESCE(sp.change, 0)
+        END AS price_change,
+        CASE
+          WHEN a.has_prior_close AND a.prior_close <> 0 THEN (a.latest_close / a.prior_close) - 1
+          WHEN a.window_count = $3 AND a.all_positive_returns THEN EXP(a.log_return_sum) - 1
+          WHEN pp.price_before_window IS NOT NULL AND pp.price_before_window > 0 THEN (a.latest_close / pp.price_before_window) - 1
+          ELSE COALESCE(sp.change_percent, 0) / 100
+        END AS change_percent,
         s.name AS full_name,
         s.short_name,
         s.market,
         s.industry
       FROM aggregated a
-      LEFT JOIN stock_prices p ON p.symbol = a.symbol AND p.date = $1::date
+      LEFT JOIN prior_price pp ON pp.symbol = a.symbol
+      LEFT JOIN stock_prices sp ON sp.symbol = a.symbol AND sp.date = $1::date
+      LEFT JOIN stock_prices prev ON prev.symbol = a.symbol AND prev.date = $1::date - ($3::int) * INTERVAL '1 day'
       LEFT JOIN stock_symbols s ON s.symbol = a.symbol
-      ORDER BY a.period_return DESC
+      ORDER BY latest_return_pct DESC NULLS LAST
       LIMIT $4
     `;
     const q = await client.query(sql, [isoDate, (market || 'all'), windowDays, lim]);

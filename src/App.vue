@@ -23,6 +23,8 @@ const currentView = ref('overview')
 const selectedDateRef = ref('')
 const periodRef = ref('daily')
 const filtersRef = reactive({ market: 'all', industry: 'all', returnRange: 'all', volumeThreshold: 0 })
+let hasAttemptedAutoPeriodFallback = false
+let allowDailyAutoFallback = false
 
   const qs = (sel, root = document) => root.querySelector(sel)
   const qsa = (sel, root = document) => Array.from(root.querySelectorAll(sel))
@@ -111,17 +113,31 @@ const filtersRef = reactive({ market: 'all', industry: 'all', returnRange: 'all'
       fetchRankings({ period, ...filters, limit: 200 }),
       fetchStatistics({ period, market: filters.market, date: filters.date })
     ])
+    if (
+      period === 'daily'
+      && allowDailyAutoFallback
+      && !hasAttemptedAutoPeriodFallback
+      && list.length > 0
+      && list.every((item) => Number(item.return_rate) === 0)
+    ) {
+      hasAttemptedAutoPeriodFallback = true
+      periodRef.value = 'monthly'
+      await loadAndRender()
+      return
+    }
+    hasAttemptedAutoPeriodFallback = false
     // map to currentData shape
     currentData.value = list.map((item, idx) => ({
       rank: idx + 1,
       symbol: item.symbol,
       name: item.name || item.symbol,
       short_name: item.short_name || item.name || '',
-      return: parseFloat(item.return_rate) || 0,
-      price: parseFloat(item.current_price) || 0,
-      change: parseFloat(item.price_change) || 0,
-      volume: parseInt(item.volume) || 0,
-      cumulative: parseFloat(item.cumulative_return) || 0,
+      return: Number(item.return_rate) || 0,
+      price: Number(item.current_price) || 0,
+      priorClose: Number(item.prior_close) || 0,
+      change: Number(item.price_change) || 0,
+      volume: Number(item.volume) || 0,
+      cumulative: Number(item.cumulative_return ?? item.return_rate) || 0,
       market: item.market || 'all',
       industry: item.industry || 'all',
       volatility: parseFloat(item.volatility) || 0.5,
@@ -330,7 +346,15 @@ const filtersRef = reactive({ market: 'all', industry: 'all', returnRange: 'all'
   function onHeaderChangeView(v){ switchView(v) }
 
   // Filter handlers
-  function onUpdatePeriod(p){ periodRef.value = p; loadAndRender() }
+function onUpdatePeriod(p){
+  if (p === 'daily') {
+    allowDailyAutoFallback = false
+  } else {
+    allowDailyAutoFallback = true
+  }
+  periodRef.value = p
+  loadAndRender()
+}
   function onUpdateFilters(f){ Object.assign(filtersRef, f); loadAndRender() }
 </script>
 

@@ -128,7 +128,8 @@
     --container-max: 1500px;
     --gutter: var(--spacing-xl);
     --block-padding: var(--spacing-xl);
-    --cell-size: 60px;
+    --cell-size: 64px;
+    --cell-gap: 8px;
     
     /* === 動畫系統 === */
     --transition-fast: 0.15s ease;
@@ -971,8 +972,8 @@ body {
 .btn-primary { background: var(--gradient-button); border:none; color:#0b1020; font-weight:600; }
 .btn-primary:hover { transform: translateY(-2px); box-shadow:0 8px 20px rgba(0,212,255,0.4); }
 .btn-icon:hover { border-color:var(--primary-cyan); background:rgba(0,212,255,0.1); color:var(--primary-cyan); }
-.heatmap-grid { display:grid; grid-template-columns: repeat(auto-fill, var(--cell-size)); grid-auto-rows: var(--cell-size); justify-content:start; gap:4px; min-height:300px; padding:1.25rem; background: radial-gradient(1200px 400px at 10% 0%, rgba(0,212,255,0.06), transparent 60%), radial-gradient(800px 300px at 90% 100%, rgba(255,0,128,0.05), transparent 60%), rgba(0,0,0,0.2); position:relative; }
-.heatmap-cell { height:var(--cell-size); width:100%; border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; transition:all .3s ease; border:1px solid rgba(255,255,255,0.1); position:relative; overflow:hidden; }
+.heatmap-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(var(--cell-size), 1fr)); grid-auto-rows: var(--cell-size); justify-content:start; gap:var(--cell-gap); min-height:300px; padding:calc(1rem + var(--cell-gap)); background: radial-gradient(1200px 400px at 10% 0%, rgba(0,212,255,0.06), transparent 60%), radial-gradient(800px 300px at 90% 100%, rgba(255,0,128,0.05), transparent 60%), rgba(0,0,0,0.2); position:relative; }
+.heatmap-cell { height:var(--cell-size); width:100%; border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; transition:all .3s ease; border:1px solid rgba(255,255,255,0.12); position:relative; overflow:hidden; padding:0.35rem; }
 .heatmap-cell:hover { transform:scale(1.1); z-index:10; box-shadow:0 8px 25px rgba(0,0,0,0.4); }
 .heatmap-cell.highlight { outline:2px solid var(--primary-cyan); box-shadow:0 0 0 3px rgba(0,212,255,0.25), 0 8px 25px rgba(0,0,0,0.4); transform:scale(1.08); }
 .heatmap-cell.positive-high { background: linear-gradient(135deg, #dc2626, #991b1b); color:#fff; }
@@ -1141,87 +1142,111 @@ body {
 .inbox-item { display:flex; justify-content:space-between; align-items:center; padding:.75rem 1rem; border:1px solid var(--border-secondary); border-radius:12px; background: linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); }
 /* === 響應式設計 === */
 
-/* 大型桌面 (1440px+) */
+@media (min-width: 1920px) {
+  :root {
+    --container-max: 1840px;
+  }
+}
+
 @media (min-width: 1440px) {
   :root {
     --container-max: 1600px;
     --gutter: var(--spacing-2xl);
   }
-  
-  .stats-grid { 
-    grid-template-columns: repeat(5, 1fr); 
+
+  .stats-grid {
+    grid-template-columns: repeat(5, 1fr);
   }
-  
+
   .filter-controls {
     grid-template-columns: repeat(5, 1fr);
   }
 }
 
-/* 中型桌面 (1024px - 1439px) */
-@media (min-width: 1024px) and (max-width: 1439px) {
-  .stats-grid { 
-    grid-template-columns: repeat(3, 1fr); 
+@media (min-width: 1160px) and (max-width: 1439px) {
+  .stats-grid {
+    grid-template-columns: repeat(4, 1fr);
   }
-  
+
   .filter-controls {
     grid-template-columns: repeat(3, 1fr);
   }
 }
 
-/* 平板電腦 (768px - 1023px) */
-@media (min-width: 768px) and (max-width: 1023px) {
-  :root {
-    --gutter: var(--spacing-lg);
-    --block-padding: var(--spacing-lg);
-  }
-  
-  .header-title h1 {
-    font-size: var(--font-size-2xl);
-  }
-  
-  .nav-item {
-    padding: var(--spacing-sm) var(--spacing-lg);
-    font-size: var(--font-size-xs);
-  }
-  
+@media (min-width: 900px) and (max-width: 1159px) {
   .stats-grid {
-    grid-template-columns: repeat(2, 1fr);
-    gap: var(--spacing-lg);
+    grid-template-columns: repeat(3, 1fr);
   }
-  
+
   .filter-controls {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 
-/* 手機 (767px 以下) */
+@media (min-width: 768px) and (max-width: 1023px) {
+  :root {
+    --gutter: var(--spacing-lg);
+    --block-padding: var(--spacing-lg);
+  }
+
+  .header-title h1 {
+    font-size: var(--font-size-2xl);
+  }
+
+  .nav-item {
+    padding: var(--spacing-sm) var(--spacing-lg);
+    font-size: var(--font-size-xs);
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--spacing-lg);
+  }
+
+  .filter-controls {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 @media (max-width: 767px) {
   :root {
     --gutter: var(--spacing-md);
     --block-padding: var(--spacing-md);
     --spacing-2xl: var(--spacing-xl);
   }
-  
+
+  body {
+    overflow-x: hidden;
+  }
+
   .header-content {
     flex-direction: column;
+    align-items: stretch;
     gap: var(--spacing-md);
     padding: var(--spacing-sm) 0;
   }
-  
+
+  .header-title {
+    justify-content: center;
+  }
+
+  .header-title h1 {
+    font-size: var(--font-size-xl);
+  }
+
   .header-actions {
     flex-wrap: wrap;
     justify-content: center;
     gap: var(--spacing-sm);
+    width: 100%;
   }
-  
-  .header-title h1 {
-    font-size: var(--font-size-xl);
-  }
-  
+
   .main-nav {
-    top: 120px;
+    position: static;
+    padding: 0 var(--gutter);
+    margin-top: var(--spacing-sm);
   }
-  
+
   .nav-container {
     overflow-x: auto;
     gap: var(--spacing-sm);
@@ -1229,77 +1254,100 @@ body {
     scrollbar-width: none;
     -ms-overflow-style: none;
   }
-  
+
   .nav-container::-webkit-scrollbar {
     display: none;
   }
-  
+
   .nav-item {
-    padding: var(--spacing-sm) var(--spacing-md);
+    padding: var(--spacing-xs) var(--spacing-md);
     font-size: var(--font-size-xs);
     white-space: nowrap;
-    min-width: fit-content;
+    min-width: max-content;
   }
-  
+
+  .content-shell {
+    padding-inline: var(--spacing-sm);
+    gap: var(--spacing-xl);
+  }
+
   .stats-grid,
   .filter-controls,
   .analysis-tools,
   .comparison-grid,
   .alerts-grid {
     grid-template-columns: 1fr;
-    gap: var(--spacing-lg);
+    gap: var(--spacing-md);
   }
-  
+
   .stat-card {
-    min-height: 140px;
-  }
-  
-  .stat-value {
-    font-size: var(--font-size-3xl);
-  }
-  
-  .heatmap-grid {
-    grid-template-columns: repeat(auto-fill, 50px);
-    grid-auto-rows: 50px;
-    gap: 2px;
     padding: var(--spacing-lg);
+    min-height: auto;
+    aspect-ratio: auto;
   }
-  
+
+  .stat-header {
+    align-items: center;
+  }
+
+  .stat-icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .stat-value {
+    font-size: clamp(1.4rem, 5vw, var(--font-size-2xl));
+  }
+
+  .stat-subinfo {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--spacing-xs);
+  }
+
   .filter-panel {
     padding: var(--spacing-lg);
+    border-radius: var(--radius-lg);
   }
-  
+
   .filter-header {
     flex-direction: column;
     align-items: flex-start;
     gap: var(--spacing-lg);
   }
-  
+
   .period-selector {
     width: 100%;
     justify-content: space-between;
+    flex-wrap: nowrap;
+    overflow: hidden;
   }
-  
-  .period-btn {
-    flex: 1;
-    text-align: center;
+
+  .period-selector .period-chip {
+    flex: 1 0 auto;
+    font-size: 0.75rem;
+    padding: var(--spacing-xs) var(--spacing-sm);
   }
-}
 
-/* Allow extra-wide layouts to stretch slightly more */
-@media (min-width: 1920px) {
-  :root { --container-max: 1840px; }
-}
+    .heatmap-grid {
+    grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+    grid-auto-rows: 56px;
+    gap: 6px;
+    padding: calc(var(--spacing-lg));
+  }
 
-/* Layout alignment to reference image */
-@media (min-width: 1400px) {
-  .stats-grid { grid-template-columns: repeat(5, 1fr); }
-}
+  .ranking-table-container,
+  .heatmap-container {
+    padding: var(--spacing-lg);
+  }
 
-@media (min-width: 1160px) and (max-width: 1399px) {
-  .stats-grid { grid-template-columns: repeat(4, 1fr); }
-}
+  .ranking-table thead {
+    font-size: 0.7rem;
+  }
 
-@media (min-width: 900px) and (max-width: 1159px) {
-  .stats-grid { grid-template-columns: repeat(3, 1fr); }
+  .ranking-table th,
+  .ranking-table td {
+    padding-inline: var(--spacing-sm);
+    font-size: 0.75rem;
+  }
 }

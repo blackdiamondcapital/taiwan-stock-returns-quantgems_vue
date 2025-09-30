@@ -39,16 +39,25 @@ function onEnter(cell, ev){
   const sym = cell.symbol
   const val = Number(cell.return)
   state.tooltip.content = `<strong>${sym}</strong><br/>報酬率：${isFinite(val)?val.toFixed(2):'-'}%`
-  onMove(ev)
+  updateTooltipPosition(ev?.currentTarget)
 }
 function onMove(ev){
-  state.tooltip.x = ev.clientX + 10
-  state.tooltip.y = ev.clientY + 10
+  updateTooltipPosition(ev?.currentTarget)
 }
-function onLeave(){ state.tooltip.show = false }
+function onLeave(){
+  state.tooltip.show = false
+}
+function updateTooltipPosition(target){
+  if (!target) return
+  const rect = target.getBoundingClientRect()
+  state.tooltip.x = rect.left + rect.width / 2
+  state.tooltip.y = rect.top - 12
+}
 
 function onSizeChange(){
   document.documentElement.style.setProperty('--cell-size', `${state.cellSize}px`)
+  const gap = Math.max(4, Math.round(state.cellSize * 0.12))
+  document.documentElement.style.setProperty('--cell-gap', `${gap}px`)
 }
 
 </script>
