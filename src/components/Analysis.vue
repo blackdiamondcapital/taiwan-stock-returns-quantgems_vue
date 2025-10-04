@@ -25,6 +25,7 @@ const state = reactive({
 const loading = ref(false)
 const analysisRows = ref([])
 let chart
+let resizeFrame = null
 
 const periodOptions = [
   { value: 'daily', label: '日' },
@@ -92,8 +93,9 @@ function buildGroups(data, factorKey, bucketCount){
 
 function renderChart(){
   const wrap = document.getElementById('quantBarWrap')
-  const ctx = document.getElementById('quantBarCanvas')?.getContext('2d')
-  if (!ctx || !wrap) return
+  const canvasEl = document.getElementById('quantBarCanvas')
+  const ctx = canvasEl?.getContext('2d')
+  if (!ctx || !wrap || !canvasEl) return
   const groups = buildGroups(analysisRows.value, state.factor, Number(state.buckets))
   if (chart) { chart.destroy(); chart = null }
   if (!groups.length){
@@ -101,14 +103,25 @@ function renderChart(){
     return
   }
   wrap.classList.remove('empty')
+  const wrapWidth = wrap.offsetWidth || 0
+  const axisFontSize = wrapWidth < 420 ? 10 : wrapWidth < 640 ? 12 : 14
+  const valueFontSize = wrapWidth < 480 ? 11 : wrapWidth < 780 ? 12 : 13
+  const labelRotation = wrapWidth < 560 ? 35 : wrapWidth < 720 ? 20 : 0
+  const maxTicks = wrapWidth < 420 ? 5 : wrapWidth < 640 ? 8 : 10
+  const maxBarThickness = wrapWidth < 420 ? 26 : wrapWidth < 640 ? 34 : 42
+  const borderRadius = wrapWidth < 420 ? 8 : wrapWidth < 640 ? 10 : 12
+  const chartHeight = wrapWidth < 420 ? 230 : wrapWidth < 768 ? 270 : 320
+  canvasEl.height = chartHeight
+  canvasEl.style.height = `${chartHeight}px`
+  wrap.style.setProperty('--chart-height', `${chartHeight}px`)
   const metricKey = state.metric === 'ir' ? 'ir' : 'mean'
   const labels = groups.map(g => `${g.label} (n=${g.count})`)
   const values = groups.map(g => Number.isFinite(g[metricKey]) ? g[metricKey] : 0)
 
-  const posGrad = ctx.createLinearGradient(0, 0, 0, 300)
+  const posGrad = ctx.createLinearGradient(0, 0, 0, chartHeight)
   posGrad.addColorStop(0, 'rgba(0, 212, 255, 0.95)')
   posGrad.addColorStop(1, 'rgba(0, 160, 255, 0.45)')
-  const negGrad = ctx.createLinearGradient(0, 0, 0, 300)
+  const negGrad = ctx.createLinearGradient(0, 0, 0, chartHeight)
   negGrad.addColorStop(0, 'rgba(255, 120, 160, 0.9)')
   negGrad.addColorStop(1, 'rgba(255, 80, 120, 0.55)')
   const neutralColor = 'rgba(0, 212, 255, 0.85)'
@@ -131,23 +144,62 @@ function renderChart(){
         backgroundColor: colors,
         borderColor: borderColors,
         borderWidth: 1.2,
-        borderRadius: 12,
+        borderRadius,
         barThickness: 'flex',
-        maxBarThickness: 42,
+        maxBarThickness,
         hoverBackgroundColor: colors,
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      layout: {
+        padding: {
+          top: wrapWidth < 560 ? 8 : 12,
+          right: 12,
+          bottom: wrapWidth < 560 ? 12 : 18,
+          left: 10,
+        },
+      },
       plugins: { legend: { display: false } },
       animation: { duration: 650, easing: 'easeOutQuart' },
       scales: {
-        x: { ticks: { color: '#ffffff', font: { size: 14, family: '"Noto Sans TC", sans-serif' } }, grid: { color: 'rgba(255,255,255,0.08)' } },
-        y: { title: { display: true, text: metricKey === 'ir' ? 'Information Ratio' : 'Return (%)', color: '#9ca3af', font: { size: 13 } },
-             ticks: { color: '#e5e7eb', font: { size: 13 } }, grid: { color: 'rgba(255,255,255,0.08)' }, suggestedMax: ymax, suggestedMin: yMin }
+        x: {
+          ticks: {
+            color: '#ffffff',
+            font: { size: axisFontSize, family: '"Noto Sans TC", sans-serif' },
+            maxRotation: labelRotation,
+            minRotation: labelRotation,
+            autoSkip: true,
+            maxTicksLimit: maxTicks,
+          },
+          grid: { color: 'rgba(255,255,255,0.08)' },
+        },
+        y: {
+          title: {
+            display: true,
+            text: metricKey === 'ir' ? 'Information Ratio' : 'Return (%)',
+            color: '#9ca3af',
+            font: { size: valueFontSize },
+          },
+          ticks: {
+            color: '#e5e7eb',
+            font: { size: valueFontSize },
+            padding: 6,
+          },
+          grid: { color: 'rgba(255,255,255,0.08)' },
+          suggestedMax: ymax,
+          suggestedMin: yMin,
+        }
       }
     }
+  })
+}
+
+function handleResize(){
+  if (resizeFrame) cancelAnimationFrame(resizeFrame)
+  resizeFrame = requestAnimationFrame(() => {
+    renderChart()
   })
 }
 
@@ -253,7 +305,14 @@ watch([analysisRows, () => state.factor, () => state.buckets, () => state.metric
 watch(() => [panel.period, panel.market], () => {
   loadAnalysisData()
 }, { immediate: true })
-onBeforeUnmount(() => { if (chart) { chart.destroy(); chart = null } })
+onMounted(() => {
+  window.addEventListener('resize', handleResize)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleResize)
+  if (resizeFrame) cancelAnimationFrame(resizeFrame)
+  if (chart) { chart.destroy(); chart = null }
+})
 
 function generateSignals(){
   const data = Array.isArray(analysisRows.value) ? analysisRows.value : []

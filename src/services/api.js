@@ -32,3 +32,18 @@ export async function fetchStatistics({ period, market, date }) {
     return { data: null, asOfDate: null };
   }
 }
+
+export async function fetchComparison({ symbols, period, date, market }) {
+  try {
+    const symbolParam = Array.isArray(symbols) ? symbols.join(',') : symbols;
+    const json = await httpGet('/returns/comparison', { symbols: symbolParam, period, date, market });
+    return {
+      data: json?.data ?? [],
+      asOfDate: json?.asOfDate ?? null,
+      count: json?.count ?? 0,
+    };
+  } catch (e) {
+    console.warn('fetchComparison error', e);
+    return { data: [], asOfDate: null, count: 0 };
+  }
+}

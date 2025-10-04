@@ -54,6 +54,50 @@ function toIsoDate(value) {
   return d.toISOString().slice(0, 10);
 }
 
+function normalizeSymbolValue(value) {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/\.(TW|TWO)$/i, '');
+}
+
+function parseSymbolsParam(raw) {
+  if (!raw) return [];
+
+  const seen = new Set();
+  const result = [];
+
+  const push = (value) => {
+    const sym = String(value || '').trim().toUpperCase();
+    if (!sym) return;
+    if (seen.has(sym)) return;
+    seen.add(sym);
+    result.push(sym);
+  };
+
+  const entries = Array.isArray(raw)
+    ? raw.flatMap(item => String(item || '').split(/[\,\s]+/))
+    : String(raw).split(/[\,\s]+/);
+
+  entries.forEach(item => {
+    const trimmed = String(item || '').trim();
+    if (!trimmed) return;
+
+    const upper = trimmed.toUpperCase();
+    push(upper);
+
+    const normalized = normalizeSymbolValue(upper);
+    if (normalized && normalized !== upper) push(normalized);
+
+    if (!upper.includes('.') && normalized) {
+      push(`${normalized}.TW`);
+      push(`${normalized}.TWO`);
+    }
+  });
+
+  return result.slice(0, 60);
+}
+
 async function resolveStockDate(client, requestedDate) {
   const isoRequested = toIsoDate(requestedDate);
   if (isoRequested) {
@@ -662,6 +706,202 @@ app.get('/api/returns/rankings', async (req, res) => {
     if (!USE_FALLBACK) return res.status(500).json({ error: e.message });
     const now = date || new Date().toISOString().slice(0,10);
     res.json({ data: demoRankings(now, lim), count: lim, asOfDate: now, fallback: true });
+  } finally {
+    try { client && client.release(); } catch {}
+  }
+});
+
+app.get('/api/returns/comparison', async (req, res) => {
+  const { symbols, period = 'daily', date, market = 'all' } = req.query;
+  const symbolList = parseSymbolsParam(symbols);
+
+  if (!symbolList.length) {
+    return res.json({ data: [], count: 0, asOfDate: null });
+  }
+
+  const periodKey = String(period || 'daily').toLowerCase();
+  const periodWindowDays = {
+    daily: 1,
+    weekly: 5,
+    monthly: 21,
+    quarterly: 63,
+    yearly: 252,
+  };
+  const windowDays = periodWindowDays[periodKey] || periodWindowDays.daily;
+
+  const buildEmptyRows = () => symbolList.map(symbol => ({
+    symbol,
+    name: null,
+    short_name: null,
+    market: null,
+    price: null,
+    prior_close: null,
+    volume: null,
+    return: null,
+    volatility: null,
+    missing: true,
+  }));
+
+  let client;
+  try {
+    client = await pool.connect();
+    const targetDate = await resolveStockDate(client, date);
+
+    if (!targetDate) {
+      const emptyRows = buildEmptyRows();
+      return res.json({ data: emptyRows, count: emptyRows.length, asOfDate: null });
+    }
+
+    const isoDate = toIsoDate(targetDate) || targetDate;
+    const params = [isoDate, symbolList];
+    const sql = `
+      WITH input_symbols AS (
+        SELECT 
+          UNNEST($2::text[]) AS symbol,
+          REGEXP_REPLACE(UPPER(UNNEST($2::text[])), '\\.(TW|TWO)$', '', 'i') AS normalized
+      ),
+      latest_two AS (
+        SELECT
+          sp.symbol,
+          sp.date,
+          sp.close_price,
+          sp.volume,
+          REGEXP_REPLACE(UPPER(sp.symbol), '\\.(TW|TWO)$', '', 'i') AS normalized,
+          ROW_NUMBER() OVER (PARTITION BY sp.symbol ORDER BY sp.date DESC) AS rn
+        FROM stock_prices sp
+        WHERE sp.date <= $1::date
+          AND EXISTS (
+            SELECT 1 FROM input_symbols i 
+            WHERE REGEXP_REPLACE(UPPER(sp.symbol), '\\.(TW|TWO)$', '', 'i') = i.normalized
+          )
+      ),
+      prices_pivot AS (
+        SELECT
+          symbol,
+          normalized,
+          MAX(close_price) FILTER (WHERE rn = 1) AS latest_close,
+          MAX(volume)      FILTER (WHERE rn = 1) AS latest_volume,
+          MAX(close_price) FILTER (WHERE rn = 2) AS prior_close
+        FROM latest_two
+        GROUP BY symbol, normalized
+      ),
+      day_return AS (
+        SELECT 
+          r.symbol, 
+          r.daily_return,
+          REGEXP_REPLACE(UPPER(r.symbol), '\\.(TW|TWO)$', '', 'i') AS normalized
+        FROM stock_returns r
+        WHERE r.date = $1::date
+          AND EXISTS (
+            SELECT 1 FROM input_symbols i 
+            WHERE REGEXP_REPLACE(UPPER(r.symbol), '\\.(TW|TWO)$', '', 'i') = i.normalized
+          )
+      ),
+      volatility AS (
+        SELECT 
+          r.symbol,
+          STDDEV_POP(r.daily_return) AS volatility,
+          REGEXP_REPLACE(UPPER(r.symbol), '\\.(TW|TWO)$', '', 'i') AS normalized
+        FROM stock_returns r
+        WHERE r.date BETWEEN ($1::date - INTERVAL '30 days') AND $1::date
+          AND EXISTS (
+            SELECT 1 FROM input_symbols i 
+            WHERE REGEXP_REPLACE(UPPER(r.symbol), '\\.(TW|TWO)$', '', 'i') = i.normalized
+          )
+        GROUP BY r.symbol
+      ),
+      meta AS (
+        SELECT 
+          s.symbol, 
+          s.name, 
+          s.short_name, 
+          s.market,
+          REGEXP_REPLACE(UPPER(s.symbol), '\\.(TW|TWO)$', '', 'i') AS normalized
+        FROM stock_symbols s
+        WHERE EXISTS (
+          SELECT 1 FROM input_symbols i 
+          WHERE REGEXP_REPLACE(UPPER(s.symbol), '\\.(TW|TWO)$', '', 'i') = i.normalized
+        )
+      )
+      SELECT
+        i.symbol AS query_symbol,
+        COALESCE(pp.symbol, dr.symbol, meta.symbol, i.symbol) AS db_symbol,
+        meta.name,
+        meta.short_name,
+        meta.market,
+        pp.latest_close AS price,
+        pp.latest_volume AS volume,
+        CASE
+          WHEN pp.latest_close IS NOT NULL AND pp.prior_close IS NOT NULL AND pp.prior_close <> 0
+            THEN (pp.latest_close / pp.prior_close) - 1
+          ELSE dr.daily_return
+        END AS return,
+        pp.prior_close,
+        vol.volatility
+      FROM input_symbols i
+      LEFT JOIN prices_pivot pp ON pp.normalized = i.normalized
+      LEFT JOIN day_return dr ON dr.normalized = i.normalized
+      LEFT JOIN volatility vol ON vol.normalized = i.normalized
+      LEFT JOIN meta ON meta.normalized = i.normalized
+    `;
+
+    const result = await client.query(sql, params);
+    const rowMap = new Map();
+    result.rows.forEach(row => {
+      const rawKey = String(row.db_symbol || row.query_symbol || '').trim().toUpperCase();
+      const normalizedKey = normalizeSymbolValue(rawKey);
+      if (rawKey && !rowMap.has(rawKey)) {
+        rowMap.set(rawKey, row);
+      }
+      if (normalizedKey && !rowMap.has(normalizedKey)) {
+        rowMap.set(normalizedKey, row);
+      }
+    });
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug('[comparison] symbolList:', symbolList);
+      console.debug('[comparison] rowMap keys:', Array.from(rowMap.keys()));
+      console.debug('[comparison] raw rows sample:', result.rows);
+    }
+
+    const data = symbolList.map(symbol => {
+      const row = rowMap.get(symbol);
+      if (!row) {
+        return {
+          symbol,
+          name: null,
+          short_name: null,
+          market: null,
+          price: null,
+          prior_close: null,
+          volume: null,
+          return: null,
+          volatility: null,
+          missing: true,
+        };
+      }
+      return {
+        symbol,
+        name: row.name || null,
+        short_name: row.short_name || null,
+        market: row.market || null,
+        price: row.price !== null ? Number(row.price) : null,
+        prior_close: row.prior_close !== null ? Number(row.prior_close) : null,
+        volume: row.volume !== null ? Number(row.volume) : null,
+        return: row.return !== null ? Number(row.return) : null,
+        volatility: row.volatility !== null ? Number(row.volatility) : null,
+        missing: (row.price === null && row.return === null && row.volume === null),
+      };
+    });
+
+    res.json({ data, count: data.length, asOfDate: isoDate });
+  } catch (e) {
+    console.error('comparison error:', e.message);
+    if (!USE_FALLBACK) {
+      return res.status(500).json({ error: e.message, data: buildEmptyRows(), count: symbolList.length, asOfDate: null });
+    }
+    const emptyRows = buildEmptyRows();
+    res.json({ data: emptyRows, count: emptyRows.length, asOfDate: null, fallback: true });
   } finally {
     try { client && client.release(); } catch {}
   }
