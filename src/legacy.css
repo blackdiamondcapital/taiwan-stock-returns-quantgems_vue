@@ -216,6 +216,110 @@ body {
   align-items: center;
   gap: var(--spacing-lg);
 }
+
+/* === 認證按鈕 === */
+.auth-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: 1rem;
+  padding-left: 1rem;
+  border-left: 1px solid rgba(99, 179, 237, 0.2);
+}
+
+.btn-auth-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.8), rgba(30, 41, 59, 0.6));
+  border: 1px solid rgba(99, 179, 237, 0.3);
+  border-radius: 8px;
+  color: rgba(226, 232, 240, 0.9);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-auth-header:hover {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.8));
+  border-color: rgba(0, 212, 255, 0.5);
+  color: #00d4ff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 212, 255, 0.2);
+}
+
+.btn-auth-header.btn-primary {
+  background: linear-gradient(135deg, #00d4ff, #0ea5e9);
+  border-color: transparent;
+  color: #fff;
+}
+
+.btn-auth-header.btn-primary:hover {
+  background: linear-gradient(135deg, #0ea5e9, #0284c7);
+  box-shadow: 0 4px 16px rgba(0, 212, 255, 0.4);
+  color: #fff;
+}
+
+/* === 用戶選單 === */
+.user-menu {
+  position: relative;
+}
+
+.user-menu-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.8), rgba(30, 41, 59, 0.6));
+  border: 1px solid rgba(99, 179, 237, 0.3);
+  border-radius: 999px;
+  color: rgba(226, 232, 240, 0.9);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.user-menu-trigger:hover {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.8));
+  border-color: rgba(0, 212, 255, 0.5);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 212, 255, 0.2);
+}
+
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.2), rgba(59, 130, 246, 0.15));
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(0, 212, 255, 0.4);
+}
+
+.user-avatar i {
+  color: #00d4ff;
+  font-size: 0.9rem;
+}
+
+.user-name {
+  color: #fff;
+  font-weight: 600;
+}
+
+.user-plan-badge {
+  padding: 0.2rem 0.6rem;
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(245, 158, 11, 0.15));
+  color: #fbbf24;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
 /* === 狀態指示器 === */
 .status-indicator { 
   display: inline-flex; 
@@ -371,6 +475,20 @@ body {
 .nav-item:hover i,
 .nav-item.active i {
   transform: scale(1.1);
+}
+
+.nav-item-logout {
+  margin-left: auto;
+  color: rgba(239, 68, 68, 0.9) !important;
+}
+
+.nav-item-logout:hover {
+  background: rgba(239, 68, 68, 0.1) !important;
+  color: #ef4444 !important;
+}
+
+.nav-item-logout:hover::before {
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.3), transparent);
 }
 
 /* === 主內容區域 === */
@@ -1530,6 +1648,64 @@ body {
 }
 
 .alerts-section { margin-top:1.5rem; }
+
+.notification-settings-banner {
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.15), rgba(59, 130, 246, 0.1));
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  border-radius: 16px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.banner-content {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.banner-content > i {
+  font-size: 1.75rem;
+  color: #00d4ff;
+  filter: drop-shadow(0 0 12px rgba(0, 212, 255, 0.5));
+}
+
+.banner-content > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.banner-content strong {
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.banner-content span {
+  color: rgba(226, 232, 240, 0.7);
+  font-size: 0.9rem;
+}
+
+.notification-settings-panel {
+  margin-bottom: 1.5rem;
+  animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .alerts-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap:1.5rem; }
 .alerts-card { background:var(--gradient-card); border:1px solid var(--border-secondary); border-radius:20px; padding:var(--block-padding); box-shadow:var(--shadow-card); }
 .alerts-table { width:100%; border-collapse:collapse; border-radius:12px; overflow:hidden; }

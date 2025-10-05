@@ -202,8 +202,24 @@ function renderChart() {
   destroyChart()
   const labels = rows.map(row => row.symbol)
   const data = rows.map(row => Number(row.returnRate) || 0)
-  const background = data.map(val => (val >= 0 ? 'rgba(34, 197, 94, 0.55)' : 'rgba(248, 113, 113, 0.55)'))
-  const border = data.map(val => (val >= 0 ? 'rgba(34, 197, 94, 1)' : 'rgba(248, 113, 113, 1)'))
+  
+  // Create gradient backgrounds for bars
+  const backgrounds = data.map(val => {
+    const gradient = ctx.createLinearGradient(0, 0, 0, 400)
+    if (val >= 0) {
+      gradient.addColorStop(0, 'rgba(0, 212, 255, 0.8)')  // Cyan top
+      gradient.addColorStop(1, 'rgba(16, 185, 129, 0.4)') // Green bottom
+    } else {
+      gradient.addColorStop(0, 'rgba(236, 72, 153, 0.8)') // Pink top
+      gradient.addColorStop(1, 'rgba(239, 68, 68, 0.4)')  // Red bottom
+    }
+    return gradient
+  })
+
+  // Create glow border colors
+  const borders = data.map(val => 
+    val >= 0 ? 'rgba(0, 212, 255, 1)' : 'rgba(236, 72, 153, 1)'
+  )
 
   chartInstance = new Chart(ctx, {
     type: 'bar',
@@ -213,41 +229,148 @@ function renderChart() {
         {
           label: '報酬率 (%)',
           data,
-          backgroundColor: background,
-          borderColor: border,
-          borderWidth: 1,
-          borderRadius: 10,
+          backgroundColor: backgrounds,
+          borderColor: borders,
+          borderWidth: 2,
+          borderRadius: 8,
+          borderSkipped: false,
+          // Add shadow effect
+          shadowOffsetX: 0,
+          shadowOffsetY: 4,
+          shadowBlur: 12,
+          shadowColor: data.map(val => 
+            val >= 0 ? 'rgba(0, 212, 255, 0.5)' : 'rgba(236, 72, 153, 0.5)'
+          ),
         },
       ],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      animation: {
+        duration: 1000,
+        easing: 'easeInOutQuart',
+        onProgress: function(animation) {
+          // Add glow effect during animation
+          const progress = animation.currentStep / animation.numSteps
+          ctx.shadowBlur = 15 * progress
+        },
+        onComplete: function() {
+          ctx.shadowBlur = 15
+        }
+      },
+      interaction: {
+        mode: 'index',
+        intersect: false,
+      },
       plugins: {
         legend: { display: false },
         tooltip: {
+          enabled: true,
+          backgroundColor: 'rgba(15, 23, 42, 0.95)',
+          titleColor: '#00d4ff',
+          titleFont: {
+            size: 14,
+            weight: 'bold',
+          },
+          bodyColor: '#e2e8f0',
+          bodyFont: {
+            size: 13,
+          },
+          padding: 12,
+          borderColor: 'rgba(0, 212, 255, 0.5)',
+          borderWidth: 1,
+          cornerRadius: 8,
+          displayColors: false,
           callbacks: {
+            title(context) {
+              const row = rows[context[0].dataIndex]
+              return `${row.symbol} ${row.short_name || row.name || ''}`
+            },
             label(context) {
               return `報酬率：${formatPercent(context.parsed.y, 2)}`
             },
+            afterLabel(context) {
+              const row = rows[context.dataIndex]
+              const lines = []
+              if (row.price) lines.push(`股價：NT$${formatDecimal(row.price, 2)}`)
+              if (row.volume) lines.push(`成交量：${formatNumber(row.volume)}`)
+              return lines.join('\n')
+            }
           },
         },
       },
       scales: {
         x: {
-          ticks: { color: '#cbd5f5' },
-          grid: { color: 'rgba(148, 163, 184, 0.1)' },
+          ticks: { 
+            color: 'rgba(226, 232, 240, 0.8)',
+            font: {
+              size: 12,
+              weight: '600',
+            },
+            padding: 8,
+          },
+          grid: { 
+            display: true,
+            color: 'rgba(99, 179, 237, 0.08)',
+            lineWidth: 1,
+            drawBorder: false,
+          },
+          border: {
+            display: false,
+          },
         },
         y: {
           ticks: {
-            color: '#cbd5f5',
-            callback: value => `${value}%`,
+            color: 'rgba(226, 232, 240, 0.8)',
+            font: {
+              size: 12,
+              weight: '600',
+            },
+            padding: 8,
+            callback: value => {
+              const sign = value > 0 ? '+' : ''
+              return `${sign}${value}%`
+            },
           },
-          grid: { color: 'rgba(148, 163, 184, 0.08)' },
+          grid: { 
+            display: true,
+            color: function(context) {
+              // Zero line gets special color
+              if (context.tick.value === 0) {
+                return 'rgba(99, 179, 237, 0.3)'
+              }
+              return 'rgba(99, 179, 237, 0.08)'
+            },
+            lineWidth: function(context) {
+              return context.tick.value === 0 ? 2 : 1
+            },
+            drawBorder: false,
+          },
+          border: {
+            display: false,
+            dash: [5, 5],
+          },
         },
       },
     },
   })
+  
+  // Add custom glow effect to bars
+  const originalDraw = chartInstance.draw
+  chartInstance.draw = function() {
+    ctx.save()
+    data.forEach((val, index) => {
+      if (val !== 0) {
+        ctx.shadowColor = val >= 0 ? 'rgba(0, 212, 255, 0.6)' : 'rgba(236, 72, 153, 0.6)'
+        ctx.shadowBlur = 12
+        ctx.shadowOffsetX = 0
+        ctx.shadowOffsetY = 0
+      }
+    })
+    originalDraw.call(this)
+    ctx.restore()
+  }
 }
 
 function handleResize() {

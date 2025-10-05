@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, ref, reactive } from 'vue'
 import { fetchRankings, fetchStatistics } from './services/api'
+import { useAuth } from './stores/auth'
 import HeaderNav from './components/HeaderNav.vue'
 import FilterPanel from './components/FilterPanel.vue'
 import StatsGrid from './components/StatsGrid.vue'
@@ -9,6 +10,10 @@ import RankingTable from './components/RankingTable.vue'
 import Comparison from './components/Comparison.vue'
 import Alerts from './components/Alerts.vue'
 import Analysis from './components/Analysis.vue'
+import LoginModal from './components/Auth/LoginModal.vue'
+import RegisterModal from './components/Auth/RegisterModal.vue'
+import UserProfile from './components/UserProfile.vue'
+import Pricing from './components/Pricing.vue'
 
 // Shared reactive state
 const currentData = ref([])
@@ -23,6 +28,11 @@ const currentView = ref('overview')
 const selectedDateRef = ref('')
 const periodRef = ref('daily')
 const filtersRef = reactive({ market: 'all', industry: 'all', returnRange: 'all', volumeThreshold: 0 })
+
+// 認證狀態
+const { isAuthenticated, user, fetchCurrentUser } = useAuth()
+const showLoginModal = ref(false)
+const showRegisterModal = ref(false)
 let hasAttemptedAutoPeriodFallback = false
 let allowDailyAutoFallback = false
 
@@ -369,6 +379,8 @@ function onUpdatePeriod(p){
       @refresh="onHeaderRefresh"
       @update:date="onHeaderDateChange"
       @change-view="onHeaderChangeView"
+      @show-login="showLoginModal = true"
+      @show-register="showRegisterModal = true"
     />
 
     <!-- Main -->
@@ -424,10 +436,33 @@ function onUpdatePeriod(p){
       </div>
 
       <div v-show="currentView==='alerts'">
-        <Alerts />
+        <Alerts :rows="currentData" />
+      </div>
+
+      <div v-show="currentView==='profile'">
+        <UserProfile @change-view="onHeaderChangeView" />
+      </div>
+
+      <div v-show="currentView==='pricing'">
+        <Pricing />
       </div>
     </div>
   </main>
+
+  <!-- 認證模態框 -->
+  <LoginModal
+    v-if="showLoginModal"
+    @close="showLoginModal = false"
+    @switchToRegister="showLoginModal = false; showRegisterModal = true"
+    @loginSuccess="fetchCurrentUser"
+  />
+
+  <RegisterModal
+    v-if="showRegisterModal"
+    @close="showRegisterModal = false"
+    @switchToLogin="showRegisterModal = false; showLoginModal = true"
+    @registerSuccess="fetchCurrentUser"
+  />
   </div>
 </template>
 

@@ -69,8 +69,6 @@ function onSelectPeriod(p){
             <th :class="{sorted: sort.column==='price', [sort.direction]: sort.column==='price'}" @click="onHeaderClick('price')">價格 <span class="sort-indicator"></span></th>
             <th :class="{sorted: sort.column==='change', [sort.direction]: sort.column==='change'}" @click="onHeaderClick('change')">漲跌 <span class="sort-indicator"></span></th>
             <th :class="{sorted: sort.column==='volume', [sort.direction]: sort.column==='volume'}" @click="onHeaderClick('volume')">成交量 <span class="sort-indicator"></span></th>
-            <th :class="{sorted: sort.column==='cumulative', [sort.direction]: sort.column==='cumulative'}" @click="onHeaderClick('cumulative')">累積報酬 <span class="sort-indicator"></span></th>
-            <th>動作</th>
           </tr>
         </thead>
         <tbody>
@@ -93,14 +91,6 @@ function onSelectPeriod(p){
             <td>{{ Number(item.price).toFixed(2) }}</td>
             <td :class="item.change>=0?'positive':'negative'">{{ (item.change>=0?'+':'') + Number(item.change).toFixed(2) }}</td>
             <td>{{ Number(item.volume||0).toLocaleString() }}</td>
-            <td>
-              <span class="return-value" :class="item.cumulative>=0?'positive':'negative'">
-                {{ Number(item.cumulative).toFixed(2) }}%
-              </span>
-            </td>
-            <td>
-              <button class="btn-icon"><i class="fas fa-chart-line"></i></button>
-            </td>
           </tr>
         </tbody>
         </table>
