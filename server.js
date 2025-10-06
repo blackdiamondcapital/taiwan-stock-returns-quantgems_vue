@@ -4,6 +4,8 @@ import cors from 'cors';
 import pkg from 'pg';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import session from 'express-session';
+import passport from './config/passport.js';
 import authRoutes from './routes/auth.js';
 import paymentRoutes from './routes/payment.js';
 import notificationRoutes from './routes/notifications.js';
@@ -29,6 +31,21 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true })); // For ECPay form data
+
+// Session middleware (required for Passport)
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'quantgem-session-secret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
+// Passport middleware
+app.use(passport.initialize());
+app.use(passport.session());
 
 // 認證路由
 app.use('/api/auth', authRoutes);

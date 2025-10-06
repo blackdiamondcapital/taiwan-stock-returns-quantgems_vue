@@ -2,6 +2,7 @@ import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import pkg from 'pg';
+import passport from '../config/passport.js';
 const { Pool } = pkg;
 const router = express.Router();
 
@@ -472,5 +473,67 @@ router.put('/change-password', async (req, res) => {
     });
   }
 });
+
+// ===================================
+// Google OAuth 登入
+// ===================================
+
+// 啟動 Google OAuth 流程
+router.get('/google',
+  passport.authenticate('google', {
+    scope: ['profile', 'email']
+  })
+);
+
+// Google OAuth 回調
+router.get('/google/callback',
+  passport.authenticate('google', { 
+    failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=google_auth_failed`,
+    session: false 
+  }),
+  (req, res) => {
+    try {
+      // 生成 JWT Token
+      const token = generateToken(req.user);
+      
+      // 重定向到前端，並帶上 token
+      res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/auth/callback?token=${token}&provider=google`);
+    } catch (error) {
+      console.error('Google callback error:', error);
+      res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=token_generation_failed`);
+    }
+  }
+);
+
+// ===================================
+// Facebook OAuth 登入
+// ===================================
+
+// 啟動 Facebook OAuth 流程
+router.get('/facebook',
+  passport.authenticate('facebook', {
+    scope: ['email', 'public_profile']
+  })
+);
+
+// Facebook OAuth 回調
+router.get('/facebook/callback',
+  passport.authenticate('facebook', { 
+    failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=facebook_auth_failed`,
+    session: false 
+  }),
+  (req, res) => {
+    try {
+      // 生成 JWT Token
+      const token = generateToken(req.user);
+      
+      // 重定向到前端，並帶上 token
+      res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/auth/callback?token=${token}&provider=facebook`);
+    } catch (error) {
+      console.error('Facebook callback error:', error);
+      res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=token_generation_failed`);
+    }
+  }
+);
 
 export default router;
