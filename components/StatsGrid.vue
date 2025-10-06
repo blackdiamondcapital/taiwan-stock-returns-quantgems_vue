@@ -110,21 +110,29 @@ const handleDragEnd = () => {
         <h3 class="stats-title">市場指標</h3>
       </div>
       <div class="stats-header-center">
-        <div class="period-chip-group">
-          <button
-            v-for="item in periodOptions"
-            :key="item.value"
-            type="button"
-            class="period-chip"
-            :class="{ active: item.value === period }"
-            @click="setPeriod(item.value)"
-          >{{ item.label }}</button>
+        <div class="period-toolbar">
+          <div 
+            class="period-chip-group"
+            :style="{
+              '--active-index': activePeriodIndex,
+              '--chip-count': periodOptions.length
+            }"
+          >
+            <button
+              v-for="item in periodOptions"
+              :key="item.value"
+              type="button"
+              class="period-chip"
+              :class="{ active: item.value === period }"
+              @click="setPeriod(item.value)"
+            >{{ item.label }}</button>
+          </div>
+          <select class="market-select market-inline" :value="selectedMarket" @change="updateFilter('market', $event.target.value)">
+            <option v-for="item in marketOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+          </select>
         </div>
       </div>
       <div class="stats-header-right">
-        <select class="market-select" :value="selectedMarket" @change="updateFilter('market', $event.target.value)">
-          <option v-for="item in marketOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
-        </select>
         <button class="settings-btn" @click="showSettings = true" title="卡片設定">
           <i class="fas fa-cog"></i>
           <span>自訂顯示</span>
@@ -355,68 +363,65 @@ const handleDragEnd = () => {
   gap: 12px;
 }
 
+.period-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .period-chip-group {
   display: inline-flex;
   gap: 8px;
-  padding: 4px;
-  background: rgba(12, 22, 48, 0.55);
-  border: 1px solid rgba(63, 182, 255, 0.25);
-  border-radius: 999px;
-  box-shadow: 0 12px 30px rgba(6, 18, 41, 0.35);
-  position: relative;
-  overflow: hidden;
-}
-
-/* 按钮组背景光效 */
-.period-chip-group::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(63, 182, 255, 0.15),
-    transparent
-  );
-  animation: shimmer 2s infinite;
-}
-
-@keyframes shimmer {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
+  padding: 6px;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(100, 200, 255, 0.2);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
 
 .period-chip {
-  border: none;
-  border-radius: 999px;
-  padding: 0.4rem 0.85rem;
-  color: rgba(226, 232, 240, 0.78);
+  min-width: 48px;
+  min-height: 36px;
+  padding: 0.5rem 1rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
   background: transparent;
-  font-size: 0.85rem;
-  letter-spacing: 0.06em;
+  color: rgba(226, 232, 240, 0.85);
+  font-size: 0.9rem;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
 }
 
-.period-chip.active,
+/* 悬浮反馈 */
 .period-chip:hover {
-  color: #fff;
-  background: linear-gradient(135deg, rgba(63, 182, 255, 0.95), rgba(255, 0, 128, 0.75));
-  box-shadow: 0 8px 24px rgba(63, 182, 255, 0.35);
-  transform: scale(1.05);
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(100, 200, 255, 0.08);
+  border-color: rgba(100, 200, 255, 0.3);
 }
 
+/* 选中状态 - 清晰光环 */
 .period-chip.active {
-  animation: activePulse 2s ease-in-out infinite;
+  color: #ffffff;
+  background: rgba(100, 200, 255, 0.15);
+  border-color: rgba(100, 200, 255, 0.6);
+  box-shadow: 
+    0 0 20px rgba(100, 200, 255, 0.3),
+    inset 0 0 12px rgba(100, 200, 255, 0.15);
+  font-weight: 600;
 }
 
-@keyframes activePulse {
-  0%, 100% {
-    box-shadow: 0 8px 24px rgba(63, 182, 255, 0.35);
-  }
-  50% {
-    box-shadow: 0 12px 32px rgba(63, 182, 255, 0.55);
-  }
+/* 点击反馈 */
+.period-chip:active {
+  transform: scale(0.98);
+}
+
+/* 键盘焦点可访问性 */
+.period-chip:focus-visible {
+  outline: 2px solid rgba(100, 200, 255, 0.8);
+  outline-offset: 2px;
 }
 
 .market-select {
